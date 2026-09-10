@@ -1,0 +1,263 @@
+:root {
+  --bg: #0b1020;
+  --panel: rgba(12, 23, 36, 0.82);
+  --table-green: #0e5f3b;
+  --table-green-2: #0b3d29;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #eef6ff;
+  --text-soft: #b7d0eb;
+  --accent: #7ae3a1;
+  --secondary: #9ad7ff;
+  --warning: #ffd166;
+  --danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top, #1d2640, var(--bg) 42%);
+  color: var(--text);
+}
+
+button, input {
+  font: inherit;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.topbar,
+.table-status,
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  backdrop-filter: blur(12px);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--secondary);
+  font-size: 0.7rem;
+}
+
+h1, h2 {
+  margin: 0;
+}
+
+.status-panel {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.phase-badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(122, 227, 161, 0.12);
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 20px;
+}
+
+.panel {
+  padding: 20px;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--secondary), #4d8eff);
+  color: #071521;
+  font-weight: 700;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+}
+
+.helper-text {
+  color: var(--text-soft);
+  margin-top: 14px;
+  line-height: 1.5;
+}
+
+.start-row {
+  margin-top: 18px;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.table-panel {
+  min-height: 520px;
+}
+
+.table-surface {
+  position: relative;
+  min-height: 500px;
+  border-radius: 24px;
+  border: 20px solid #7c4d20;
+  background: linear-gradient(180deg, var(--table-green), var(--table-green-2));
+  box-shadow: inset 0 0 45px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+}
+
+.dealer-mark {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--warning);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.community-cards {
+  position: absolute;
+  top: 52%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 10px;
+}
+
+.card {
+  width: 58px;
+  height: 84px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-weight: 800;
+  color: #101b2a;
+  background: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.card.hidden {
+  background: linear-gradient(135deg, #244f7f, #10253d);
+  color: rgba(255,255,255,0.8);
+}
+
+.players-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  padding: 24px;
+  align-items: center;
+}
+
+.player-seat {
+  background: rgba(10, 18, 30, 0.43);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 10px 12px;
+  min-height: 120px;
+  max-height: 170px;
+}
+
+.player-seat.current-turn {
+  border-color: rgba(122, 227, 161, 0.9);
+  box-shadow: 0 0 0 2px rgba(122, 227, 161, 0.25);
+}
+
+.player-name {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.player-stack,
+.player-bet {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.player-state {
+  color: var(--warning);
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.player-seat.folded {
+  opacity: 0.55;
+}
+
+.player-hole {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.host-indicator {
+  margin-top: 16px;
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.table-status {
+  margin-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  gap: 18px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.status-message {
+  color: var(--secondary);
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .table-status {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

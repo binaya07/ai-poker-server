@@ -1,0 +1,26 @@
+services:
+  poker-server:
+    build: .
+    container_name: bayou-poker-server
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 3s
+
+  # Opt in with `docker compose --profile smoke up --build`.
+  # It joins three simple bots, plays one complete hand, then exits successfully.
+  poker-smoke:
+    build: .
+    profiles: ["smoke"]
+    depends_on:
+      poker-server:
+        condition: service_healthy
+    environment:
+      POKER_WS_URL: ws://poker-server:8000/ws
+    command: ["python", "scripts/smoke_bots.py"]

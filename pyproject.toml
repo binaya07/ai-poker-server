@@ -1,0 +1,11 @@
+[project]
+name = "ai-poker-server"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.115.0",
+  "uvicorn[standard]==0.30.6",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

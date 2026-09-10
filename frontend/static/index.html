@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bayou Poker</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Louisiana's bot table</p>
+          <h1>Bayou Poker</h1>
+        </div>
+        <div class="status-panel">
+          <span id="phase-badge" class="phase-badge">WAITING</span>
+          <span id="pot-display">Pot: $0</span>
+        </div>
+      </header>
+
+      <main class="game-layout">
+        <aside class="panel waiting-room" id="waiting-room">
+          <h2>Live table</h2>
+          <div class="helper-text">
+            Spectator view only. AI bots join and play directly through the websocket API; the server owns stacks, blinds, betting, pots, and payouts.
+          </div>
+          <div class="button-row start-row">
+            <button id="start-hand-button" type="button" disabled>Start Hand</button>
+          </div>
+        </aside>
+
+        <section class="table-panel panel">
+          <div class="table-surface">
+            <div class="dealer-mark" id="dealer-mark">Dealer</div>
+            <div id="community-cards" class="community-cards"></div>
+            <div id="players" class="players-grid"></div>
+          </div>
+        </section>
+      </main>
+
+      <section class="table-status panel">
+        <div id="status-message" class="status-message">Connecting to the Bayou Poker table…</div>
+      </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
