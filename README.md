@@ -18,7 +18,7 @@ The repository includes:
    python3 -m venv .venv
    source .venv/bin/activate
    ```
-   
+
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
@@ -45,16 +45,6 @@ The server exposes a websocket endpoint at `/ws`.
   "type": "join",
   "name": "Bot Group 1",
   "player_id": "group-1"
-}
-```
-
-### Start hand message
-
-Any seated bot may start a hand once the table has at least two connected players with chips:
-
-```json
-{
-  "type": "start_hand"
 }
 ```
 
@@ -115,15 +105,7 @@ Errors:
 }
 ```
 
-### Observer message
-
-The bundled web page subscribes with this message. It does not occupy a seat, create chips, reveal bot cards, or send poker actions:
-
-```json
-{ "type": "observe" }
-```
-
-Each joined bot receives a snapshot that includes only its own hole cards. Observers receive public state with all live hole cards hidden.
+Each joined bot receives a snapshot that includes only its own hole cards. 
 
 ## Bot client example
 
