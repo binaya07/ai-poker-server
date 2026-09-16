@@ -15,6 +15,10 @@ app = FastAPI(title="Bayou Poker")
 engine = PokerEngine(starting_stack=1000, small_blind=10, big_blind=20)
 connections: Dict[str, WebSocket] = {}
 spectators: set[WebSocket] = set()
+SERIES_HANDS = 10
+series_total: int | None = None
+series_completed = 0
+series_active = False
 
 
 @app.get("/")
@@ -38,16 +42,44 @@ async def _send(websocket: WebSocket, payload: dict) -> bool:
         return False
 
 
+def _table_controls() -> dict:
+    """Public metadata for the instructor UI; gameplay remains engine-owned."""
+    series = None
+    if series_total is not None:
+        series = {
+            "total_hands": series_total,
+            "completed_hands": series_completed,
+            "active": series_active,
+        }
+    return {"can_start": engine.can_start_hand(), "series": series}
+
+
+def _advance_series_if_ready() -> None:
+    """Deal the next scheduled hand only after the preceding pot is paid."""
+    global series_active, series_completed
+    if not series_active or engine.phase != "WAITING" or engine.last_action is None:
+        return
+    if engine.last_action.get("type") != "payout":
+        return
+    series_completed += 1
+    if series_completed < series_total and engine.can_start_hand():
+        engine.start_hand()
+    else:
+        series_active = False
+
+
 async def broadcast_state() -> None:
     """Send every bot its own private cards and observers only the public table."""
+    _advance_series_if_ready()
+    controls = _table_controls()
     for pid, websocket in list(connections.items()):
         payload = engine.snapshot(pid)
-        payload["can_start"] = engine.can_start_hand()
+        payload.update(controls)
         if not await _send(websocket, payload):
             connections.pop(pid, None)
             engine.remove_player(pid)
     public = engine.snapshot()
-    public["can_start"] = engine.can_start_hand()
+    public.update(controls)
     for websocket in list(spectators):
         if not await _send(websocket, public):
             spectators.discard(websocket)
@@ -55,9 +87,10 @@ async def broadcast_state() -> None:
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    global series_active, series_completed, series_total
     await websocket.accept()
     player_id: str | None = None
-    observing = False
+    is_observer = False
     try:
         while True:
             try:
@@ -71,7 +104,7 @@ async def websocket_endpoint(websocket: WebSocket):
             msg_type = data.get("type")
 
             if msg_type == "observe":
-                observing = True
+                is_observer = True
                 spectators.add(websocket)
                 await broadcast_state()
                 continue
@@ -113,12 +146,30 @@ async def websocket_endpoint(websocket: WebSocket):
                 await broadcast_state()
                 continue
             if msg_type == "start_hand":
-                if player_id is None:
-                    await websocket.send_json({"type": "error", "message": "Only a seated bot may start a hand"})
+                # The browser uses an observer connection as the instructor
+                # console. It can start a ready table but never becomes a seat.
+                if player_id is None and not is_observer:
+                    await websocket.send_json({"type": "error", "message": "Join as a bot or observer first"})
                     continue
                 if not engine.can_start_hand():
                     await websocket.send_json({"type": "error", "message": "Need at least two connected players with chips to start"})
                     continue
+                series_total = None
+                series_completed = 0
+                series_active = False
+                engine.start_hand()
+                await broadcast_state()
+                continue
+            if msg_type == "start_series":
+                if not is_observer:
+                    await websocket.send_json({"type": "error", "message": "Only an instructor observer may start a series"})
+                    continue
+                if not engine.can_start_hand():
+                    await websocket.send_json({"type": "error", "message": "Need at least two connected players with chips to start"})
+                    continue
+                series_total = SERIES_HANDS
+                series_completed = 0
+                series_active = True
                 engine.start_hand()
                 await broadcast_state()
                 continue

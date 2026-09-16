@@ -71,6 +71,9 @@ class PokerEngine:
         self.current_turn: Optional[str] = None
         self.dealer_index = -1
         self.round_acted: set[str] = set()
+        # Players in this set have already had an opportunity since the last
+        # full raise. A short all-in must not reopen raising for them.
+        self.raise_locked: set[str] = set()
         self.last_action: Optional[dict] = None
         self.hand_number = 0
 
@@ -98,6 +101,11 @@ class PokerEngine:
             player.folded = True
             self.round_acted.add(player_id)
             self._finish_if_ready()
+            # A disconnect is a fold. If it was that bot's turn and play is
+            # still live, advance immediately so the hand cannot deadlock.
+            if self.phase != "WAITING" and self.current_turn == player_id:
+                self.current_turn = self._next_actor(self.player_order.index(player_id))
+                self._finish_if_ready()
 
     def _build_deck(self) -> list[Card]:
         deck = [Card(rank, suit) for suit in Suit for rank in range(2, 15)]
@@ -146,7 +154,7 @@ class PokerEngine:
             raise ValueError("At least two connected players with chips are required to start a hand")
         self.hand_number += 1
         self.phase, self.community_cards, self.pot = "PREFLOP", [], 0
-        self.current_bet, self.minimum_raise, self.round_acted = 0, self.big_blind, set()
+        self.current_bet, self.minimum_raise, self.round_acted, self.raise_locked = 0, self.big_blind, set(), set()
         self.deck = self._build_deck()
         for player in self.players.values():
             player.reset_for_hand()
@@ -172,6 +180,7 @@ class PokerEngine:
 
     def _begin_round(self) -> None:
         self.round_acted.clear()
+        self.raise_locked.clear()
         self.current_bet, self.minimum_raise = 0, self.big_blind
         for player in self.players.values():
             player.bet = 0
@@ -239,12 +248,19 @@ class PokerEngine:
             raise_size, is_all_in = amount - self.current_bet, amount == player.bet + player.stack
             if raise_size < self.minimum_raise and not is_all_in:
                 return {"ok": False, "error": f"Raise must increase the bet by at least {self.minimum_raise}"}
+            # A player who has already acted cannot re-raise after a short
+            # all-in. Bots that have not acted since the last full raise may.
+            if self.current_bet > 0 and player_id in self.raise_locked:
+                return {"ok": False, "error": "A short all-in did not reopen raising"}
             paid = self._commit(player_id, amount - player.bet)
             self.current_bet = player.bet
             if raise_size >= self.minimum_raise:
                 self.minimum_raise = raise_size
+                self.round_acted = {player_id}
+                self.raise_locked = {player_id}
             self.last_action = {"type": "raise", "player": player_id, "amount": paid, "target": amount}
         self.round_acted.add(player_id)
+        self.raise_locked.add(player_id)
         phase_before_completion = self.phase
         self._finish_if_ready()
         if self.phase != "WAITING" and self.phase == phase_before_completion:

@@ -19,7 +19,11 @@ async def bot(player_id: str, joined: asyncio.Event, start_hand: asyncio.Event, 
     async with websockets.connect(WS_URL) as socket:
         await socket.send(json.dumps({"type": "join", "player_id": player_id, "name": player_id.replace("smoke-", "Smoke ").title()}))
         joined.set()
-        started = False
+        if player_id == BOT_IDS[0]:
+            # This event is local process coordination, not a server message.
+            # Wait for all join requests to be sent before dealing the hand.
+            await start_hand.wait()
+            await socket.send(json.dumps({"type": "start_hand"}))
         while not hand_complete.is_set():
             message = json.loads(await socket.recv())
             if message["type"] == "error":
@@ -27,10 +31,6 @@ async def bot(player_id: str, joined: asyncio.Event, start_hand: asyncio.Event, 
             if message["type"] != "state":
                 continue
             state = message["payload"]
-            if player_id == BOT_IDS[0] and start_hand.is_set() and not started:
-                await socket.send(json.dumps({"type": "start_hand"}))
-                started = True
-                continue
             if state.get("phase") == "WAITING" and state.get("hand_number") == 1 and state.get("last_action", {}).get("type") == "payout":
                 hand_complete.set()
                 return

@@ -23,16 +23,20 @@
         <aside class="panel waiting-room" id="waiting-room">
           <h2>Live table</h2>
           <div class="helper-text">
-            Spectator view only. AI bots join and play directly through the websocket API; the server owns stacks, blinds, betting, pots, and payouts.
+            Instructor view. AI bots join and play directly through the websocket API; shared table cards appear after betting rounds.
           </div>
           <div class="button-row start-row">
-            <button id="start-hand-button" type="button" disabled>Start Hand</button>
+            <button id="start-hand-button" type="button" disabled>Start One Hand</button>
+            <button id="start-series-button" class="series-button" type="button" disabled>Run 10 Hands</button>
           </div>
+          <div id="series-status" class="series-status">Single-hand mode</div>
+          <div class="stack-chart-heading">Chip stacks</div>
+          <div id="stack-chart" class="stack-chart" aria-label="Bot chip stacks"></div>
         </aside>
 
         <section class="table-panel panel">
           <div class="table-surface">
-            <div class="dealer-mark" id="dealer-mark">Dealer</div>
+            <div class="dealer-mark" id="dealer-mark">Dealer button: None</div>
             <div id="community-cards" class="community-cards"></div>
             <div id="players" class="players-grid"></div>
           </div>

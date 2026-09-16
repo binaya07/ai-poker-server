@@ -24,3 +24,15 @@ services:
     environment:
       POKER_WS_URL: ws://poker-server:8000/ws
     command: ["python", "scripts/smoke_bots.py"]
+
+  # Opt in with `docker compose --profile demo up --build` to populate the
+  # browser table with bots. The instructor UI starts each hand.
+  poker-demo-bots:
+    build: .
+    profiles: ["demo"]
+    depends_on:
+      poker-server:
+        condition: service_healthy
+    environment:
+      POKER_WS_URL: ws://poker-server:8000/ws
+    command: ["python", "scripts/demo_bots.py"]

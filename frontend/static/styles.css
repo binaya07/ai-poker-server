@@ -100,7 +100,77 @@ button {
 
 .button-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.series-button {
+  background: linear-gradient(135deg, #ffe597, #ffd166);
+}
+
+.series-status {
+  color: var(--warning);
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin-top: 14px;
+}
+
+.stack-chart-heading {
+  margin-top: 24px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.stack-chart {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.stack-row {
+  display: grid;
+  grid-template-columns: minmax(62px, 1fr) 82px 48px;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+}
+
+.stack-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stack-track {
+  height: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+
+.stack-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--secondary));
+  border-radius: inherit;
+}
+
+.stack-value {
+  color: var(--text-soft);
+  text-align: right;
+}
+
+.empty-chart {
+  color: var(--text-soft);
+  font-size: 0.82rem;
 }
 
 .helper-text {
@@ -177,9 +247,9 @@ button:disabled {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-  padding: 24px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 18px;
   align-items: center;
 }
 
@@ -188,8 +258,8 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
   padding: 10px 12px;
-  min-height: 120px;
-  max-height: 170px;
+  min-height: 108px;
+  max-height: 148px;
 }
 
 .player-seat.current-turn {
@@ -200,6 +270,20 @@ button:disabled {
 .player-name {
   font-weight: 700;
   margin-bottom: 6px;
+}
+
+.dealer-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  color: #312000;
+  font-size: 0.68rem;
+  vertical-align: middle;
 }
 
 .player-stack,
@@ -259,5 +343,19 @@ button:disabled {
   .table-status {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .players-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .players-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stack-row {
+    grid-template-columns: minmax(54px, 1fr) 70px 42px;
   }
 }

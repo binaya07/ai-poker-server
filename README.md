@@ -38,6 +38,10 @@ The repository includes:
 
 The server exposes a websocket endpoint at `/ws`.
 
+The browser is an instructor observer. It sends `{"type": "observe"}`, never
+takes a seat or receives cards, and enables **Start Hand** once two connected
+bots have chips. Bots own all poker actions through `/ws`.
+
 ### Join message
 
 ```json
@@ -47,6 +51,10 @@ The server exposes a websocket endpoint at `/ws`.
   "player_id": "group-1"
 }
 ```
+
+`player_id` is a stable, non-empty identifier. Reconnecting with the same ID
+reclaims that bot's connection; a bot that disconnected during a hand remains
+folded for that hand.
 
 ### Action message
 
@@ -107,6 +115,8 @@ Errors:
 
 Each joined bot receives a snapshot that includes only its own hole cards. 
 
+Observers receive public state only; all live hole cards remain hidden.
+
 ## Bot client example
 
 Students can create their own websocket bot client like this:
@@ -146,29 +156,6 @@ async def main():
 asyncio.run(main())
 ```
 
-## Testing
-
-Run the unit and websocket tests locally:
-
-```bash
-pytest -q
-```
-
-The test suite covers blind/action order, legal betting transitions, folds,
-all-ins and side pots, best-five-of-seven hand evaluation, private snapshots,
-and observer/websocket admission rules.
-
-For a full containerized check that includes real websocket traffic, run:
-
-```bash
-docker compose --profile smoke up --build --abort-on-container-exit --exit-code-from poker-smoke
-```
-
-Compose starts the server, waits for `/health`, then `poker-smoke` connects
-three simple call/check bots. The command succeeds only after the server deals,
-plays, and pays out one complete hand. Stop and remove the containers afterward
-with `docker compose down`.
-
 ## Docker deployment
 
 Build the image:
@@ -186,8 +173,56 @@ docker run -p 8000:8000 ai-poker-server
 Run the server and spectator UI with Compose:
 
 ```bash
-docker compose up --build
+docker-compose up --build
 ```
 
-Open [http://localhost:8000](http://localhost:8000) for the read-only table,
+Open [http://localhost:8000](http://localhost:8000) for the instructor table,
 and use `http://localhost:8000/health` for a machine-readable health check.
+
+
+## Testing server
+
+Run the unit and websocket tests locally:
+
+```bash
+pytest -q
+```
+
+The test suite covers blind/action order, legal betting transitions, folds,
+all-ins and side pots, best-five-of-seven hand evaluation, private snapshots,
+and observer/websocket admission rules.
+
+For a full containerized check that includes real websocket traffic, run:
+
+```bash
+docker-compose --profile smoke up --build --abort-on-container-exit --exit-code-from poker-smoke
+```
+
+Compose starts the server, waits for `/health`, then `poker-smoke` connects
+three simple call/check bots. The command succeeds only after the server deals,
+plays, and pays out one complete hand. Stop and remove the containers afterward
+with `docker-compose down`.
+
+### Manual UI testing/demo with simple bots
+
+Start the server and three persistent call/check bots in Docker:
+
+```bash
+docker-compose --profile demo up --build
+```
+
+Then open [http://localhost:8000](http://localhost:8000). Once the three demo
+bots appear, the instructor **Start Hand** button becomes available. Press it
+to deal a hand; the bots automatically call or check until payout. Start the
+next hand from the same button. Stop the demo with `Ctrl+C`, then run
+`docker-compose down`.
+
+Alternatively, run the bots from WSL while the server is already running:
+
+```bash
+source .venv/bin/activate
+python scripts/demo_bots.py
+```
+
+The script connects three bots by default. Use `--count 6` for six bots, or
+`--auto-start` if you want the first demo bot to start hands without the UI.

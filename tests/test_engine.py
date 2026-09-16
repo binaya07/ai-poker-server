@@ -87,6 +87,37 @@ def test_fold_awards_the_entire_pot_without_dealing_more_cards():
     assert game.players["p2"].stack == 1_010
 
 
+def test_disconnect_on_turn_advances_play_to_the_next_bot():
+    game = game_with_players(3)
+    game.start_hand()
+    disconnected = game.current_turn
+
+    game.remove_player(disconnected)
+
+    assert game.phase == "PREFLOP"
+    assert game.current_turn is not None
+    assert game.current_turn != disconnected
+
+
+def test_short_all_in_does_not_reopen_raising_for_an_acted_player():
+    game = PokerEngine(starting_stack=100, small_blind=10, big_blind=20)
+    game.add_player("p1", "Player 1")
+    game.add_player("p2", "Player 2")
+    game.add_player("p3", "Player 3")
+    game.players["p2"].stack = 25
+    game.start_hand()
+
+    assert game.place_action("p1", "call")["ok"]
+    assert game.current_turn == "p2"
+    assert game.place_action("p2", "raise", 25)["ok"]  # Short, all-in raise.
+    assert game.current_turn == "p3"
+    assert game.place_action("p3", "call")["ok"]
+    assert game.current_turn == "p1"
+    blocked = game.place_action("p1", "raise", 45)
+    assert blocked["ok"] is False
+    assert "did not reopen" in blocked["error"]
+
+
 @pytest.mark.parametrize(
     ("cards", "expected"),
     [
