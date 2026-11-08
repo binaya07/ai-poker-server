@@ -1,6 +1,7 @@
 .git
 .pytest_cache
 .venv
+.venv-win
 __pycache__
 *.py[cod]
 *.pytest_cache

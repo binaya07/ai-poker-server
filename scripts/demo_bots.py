@@ -46,7 +46,7 @@ async def run_bot(player_id: str, name: str, url: str, auto_start: bool, delay: 
             if state.get("current_turn") != player_id:
                 continue
             me = next(player for player in state["players"] if player["id"] == player_id)
-            highest_bet = max(player["bet"] for player in state["players"])
+            highest_bet = state["current_bet"]
             action = "call" if me["bet"] < highest_bet else "check"
             if delay:
                 await asyncio.sleep(delay)

@@ -409,7 +409,8 @@ button:disabled {
   min-width: 0;
 }
 
-.dealer-chip {
+.dealer-chip,
+.blind-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -422,6 +423,21 @@ button:disabled {
   color: #312000;
   font-size: 0.68rem;
   vertical-align: middle;
+}
+
+.blind-chip {
+  width: 24px;
+  border-radius: 6px;
+}
+
+.small-blind-chip {
+  background: #b9ddff;
+  color: #102d4a;
+}
+
+.big-blind-chip {
+  background: #b5eed1;
+  color: #123d2a;
 }
 
 .player-stack,

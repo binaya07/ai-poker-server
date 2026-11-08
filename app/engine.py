@@ -57,6 +57,8 @@ class PokerEngine:
     MAX_PLAYERS = 20
 
     def __init__(self, starting_stack: int = 1000, small_blind: int = 10, big_blind: int = 20):
+        if any(type(value) is not int for value in (starting_stack, small_blind, big_blind)):
+            raise ValueError("Stacks and blinds must be integer chip amounts")
         if min(starting_stack, small_blind, big_blind) <= 0 or small_blind > big_blind:
             raise ValueError("Stacks and blinds must be positive, with small blind <= big blind")
         self.starting_stack, self.small_blind, self.big_blind = starting_stack, small_blind, big_blind
@@ -70,10 +72,13 @@ class PokerEngine:
         self.minimum_raise = big_blind
         self.current_turn: Optional[str] = None
         self.dealer_index = -1
+        self.last_big_blind: Optional[str] = None
+        self.small_blind_player: Optional[str] = None
+        self.big_blind_player: Optional[str] = None
         self.round_acted: set[str] = set()
-        # Players in this set have already had an opportunity since the last
-        # full raise. A short all-in must not reopen raising for them.
-        self.raise_locked: set[str] = set()
+        # Bet faced when each player last acted; cumulative short all-ins
+        # can reopen action once that player faces a full raise.
+        self.acted_at: dict[str, int] = {}
         self.last_action: Optional[dict] = None
         self.hand_number = 0
         # Set by _resolve_showdown() for a contested pot: the phase holds at
@@ -101,7 +106,7 @@ class PokerEngine:
         if player is None:
             return
         player.connected = False
-        if self.phase != "WAITING" and not player.folded:
+        if self.phase not in ("WAITING", "SHOWDOWN") and not player.folded and not player.all_in:
             player.folded = True
             self.round_acted.add(player_id)
             self._finish_if_ready()
@@ -158,13 +163,20 @@ class PokerEngine:
             raise ValueError("At least two connected players with chips are required to start a hand")
         self.hand_number += 1
         self.phase, self.community_cards, self.pot = "PREFLOP", [], 0
-        self.current_bet, self.minimum_raise, self.round_acted, self.raise_locked = 0, self.big_blind, set(), set()
+        self.current_bet, self.minimum_raise, self.round_acted, self.acted_at = 0, self.big_blind, set(), {}
         self.deck = self._build_deck()
         for player in self.players.values():
             player.reset_for_hand()
         next_dealer = self._next_matching(self.dealer_index, lambda pid: self.players[pid].connected and self.players[pid].stack > 0)
         self.dealer_index = self.player_order.index(next_dealer)
         participants = [pid for pid in self.player_order if self.players[pid].connected and self.players[pid].stack > 0]
+        if len(participants) == 2 and self.last_big_blind in participants:
+            # Also handles the transition from multi-way to heads-up: the
+            # surviving previous big blind must not pay it twice in a row.
+            self.dealer_index = self.player_order.index(self.last_big_blind)
+        # Deal clockwise starting left of the button (button receives last).
+        seats = self.player_order[self.dealer_index + 1:] + self.player_order[:self.dealer_index + 1]
+        participants = [pid for pid in seats if pid in participants]
         for _ in range(2):
             for pid in participants:
                 self.players[pid].hole_cards.append(self.deck.pop())
@@ -174,11 +186,12 @@ class PokerEngine:
         else:
             small_blind = self._next_in_hand(self.dealer_index)
             big_blind = self._next_in_hand(self.player_order.index(small_blind))
+        self.small_blind_player, self.big_blind_player = small_blind, big_blind
         self._commit(small_blind, self.small_blind)
         self._commit(big_blind, self.big_blind)
-        # A short-stacked big blind can post less than the small blind, so
-        # the bet to match is whichever blind actually put in more.
-        self.current_bet = max(self.players[small_blind].bet, self.players[big_blind].bet)
+        self.last_big_blind = big_blind
+        # The bring-in remains a full big blind even when it is posted short.
+        self.current_bet = self.big_blind
         self.current_turn = self._next_actor(self.player_order.index(big_blind))
         self.last_action = {"type": "deal", "dealer": dealer, "small_blind": small_blind, "big_blind": big_blind}
         self._finish_if_ready()
@@ -186,7 +199,7 @@ class PokerEngine:
 
     def _begin_round(self) -> None:
         self.round_acted.clear()
-        self.raise_locked.clear()
+        self.acted_at.clear()
         self.current_bet, self.minimum_raise = 0, self.big_blind
         for player in self.players.values():
             player.bet = 0
@@ -215,10 +228,16 @@ class PokerEngine:
         contenders = [pid for pid in self.player_order if self._in_hand(pid)]
         if len(contenders) <= 1:
             return True
+        actors = [pid for pid in contenders if self._can_act(pid)]
+        if len(actors) <= 1:
+            # No dry side-pot betting. Only a call/fold decision against an
+            # actual outstanding wager remains before running out the board.
+            return not actors or self.players[actors[0]].bet >= max(self.players[pid].bet for pid in contenders)
         return all(self.players[pid].all_in or (pid in self.round_acted and self.players[pid].bet == self.current_bet) for pid in contenders)
 
     def _finish_if_ready(self) -> None:
         while self.phase not in ("WAITING", "SHOWDOWN") and self._round_complete():
+            self._return_uncalled_bet()
             if len([pid for pid in self.player_order if self._in_hand(pid)]) <= 1:
                 self._resolve_showdown()
                 return
@@ -226,15 +245,33 @@ class PokerEngine:
             if self.phase in ("WAITING", "SHOWDOWN"):
                 return
 
+    def _return_uncalled_bet(self) -> None:
+        """Return the part of a wager no other player matched, including folds."""
+        ordered = sorted(self.players.values(), key=lambda p: p.bet, reverse=True)
+        if len(ordered) < 2:
+            return
+        player = ordered[0]
+        excess = player.bet - ordered[1].bet
+        if excess:
+            player.bet -= excess
+            player.hand_contribution -= excess
+            player.stack += excess
+            player.all_in = False
+            self.pot -= excess
+
     def place_action(self, player_id: str, action: str, amount: int = 0) -> dict:
         if self.phase == "WAITING":
             return {"ok": False, "error": "No hand is in progress"}
         if self.phase == "SHOWDOWN":
             return {"ok": False, "error": "Hand is at showdown; waiting for payout"}
-        if player_id != self.current_turn:
+        if not isinstance(player_id, str) or player_id not in self.players or player_id != self.current_turn:
             return {"ok": False, "error": "It is not this player's turn"}
-        if action not in {"fold", "check", "call", "raise"} or not isinstance(amount, int) or amount < 0:
+        if not isinstance(action, str) or action not in {"fold", "check", "call", "raise", "bet"} or type(amount) is not int or amount < 0:
             return {"ok": False, "error": "Invalid action payload"}
+        if action in {"fold", "check", "call"} and amount != 0:
+            return {"ok": False, "error": "Only bet or raise accepts an amount"}
+        if action == "bet" and self.current_bet != 0:
+            return {"ok": False, "error": "Use raise when facing an existing bet"}
         player = self.players[player_id]
         if not self._can_act(player_id):
             return {"ok": False, "error": "Player can no longer act"}
@@ -249,6 +286,8 @@ class PokerEngine:
             paid = self._commit(player_id, self.current_bet - player.bet)
             self.last_action = {"type": "call", "player": player_id, "amount": paid}
         else:
+            if not any(pid != player_id and self._can_act(pid) for pid in self.player_order):
+                return {"ok": False, "error": "Cannot bet or raise against only all-in opponents"}
             if amount <= self.current_bet:
                 return {"ok": False, "error": "Raise target must exceed the current bet"}
             if amount > player.bet + player.stack:
@@ -256,19 +295,18 @@ class PokerEngine:
             raise_size, is_all_in = amount - self.current_bet, amount == player.bet + player.stack
             if raise_size < self.minimum_raise and not is_all_in:
                 return {"ok": False, "error": f"Raise must increase the bet by at least {self.minimum_raise}"}
-            # A player who has already acted cannot re-raise after a short
-            # all-in. Bots that have not acted since the last full raise may.
-            if self.current_bet > 0 and player_id in self.raise_locked:
+            # A check does not prevent raising an opening short all-in.
+            faced = self.acted_at.get(player_id)
+            if faced is not None and faced > 0 and self.current_bet - faced < self.minimum_raise:
                 return {"ok": False, "error": "A short all-in did not reopen raising"}
             paid = self._commit(player_id, amount - player.bet)
             self.current_bet = player.bet
             if raise_size >= self.minimum_raise:
                 self.minimum_raise = raise_size
                 self.round_acted = {player_id}
-                self.raise_locked = {player_id}
             self.last_action = {"type": "raise", "player": player_id, "amount": paid, "target": amount}
         self.round_acted.add(player_id)
-        self.raise_locked.add(player_id)
+        self.acted_at[player_id] = self.current_bet
         phase_before_completion = self.phase
         self._finish_if_ready()
         if self.phase != "WAITING" and self.phase == phase_before_completion:
@@ -327,7 +365,7 @@ class PokerEngine:
             reveal = player_id == pid or (self.phase == "SHOWDOWN" and not p.folded)
             cards = [c.to_dict() for c in p.hole_cards] if reveal else [{"rank": "?", "suit": "?", "label": "??"} for _ in p.hole_cards]
             players.append({"id": p.player_id, "name": p.name, "stack": p.stack, "bet": p.bet, "folded": p.folded, "all_in": p.all_in, "connected": p.connected, "hole_cards": cards})
-        return {"phase": self.phase, "pot": self.pot, "community_cards": [c.to_dict() for c in self.community_cards], "players": players, "current_turn": self.current_turn, "dealer": self.dealer, "hand_number": self.hand_number, "last_action": self.last_action, "small_blind": self.small_blind, "big_blind": self.big_blind}
+        return {"phase": self.phase, "pot": self.pot, "community_cards": [c.to_dict() for c in self.community_cards], "players": players, "current_turn": self.current_turn, "dealer": self.dealer, "small_blind_player": self.small_blind_player, "big_blind_player": self.big_blind_player, "hand_number": self.hand_number, "last_action": self.last_action, "small_blind": self.small_blind, "big_blind": self.big_blind, "current_bet": self.current_bet, "minimum_raise": self.minimum_raise}
 
     @staticmethod
     def _straight_high(ranks: list[int]) -> Optional[int]:

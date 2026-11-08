@@ -1,0 +1,5 @@
+# Read when the server starts. Restart after changing these settings.
+turn_timeout_seconds = 15
+starting_stack = 1000
+small_blind = 10
+big_blind = 20
