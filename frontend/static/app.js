@@ -231,7 +231,7 @@ function renderState(snapshot) {
     const state = out ? 'Eliminated' : (player.folded ? 'Folded' : (player.all_in ? 'All-in' : (turn ? 'Acting' : 'Waiting')));
     return `<div class="player-seat ${turn ? 'current-turn' : ''} ${player.folded ? 'folded' : ''} ${out ? 'eliminated' : ''}" style="--player-color:${playerColor(player.id)}">
       <div class="player-last-action">${escapeHtml(lastActionByPlayer[player.id] || '')}</div>
-      <div class="player-name"><span class="player-name-text">${escapeHtml(player.name)}</span>${snapshot.dealer === player.id ? '<span class="dealer-chip">D</span>' : ''}</div>
+      <div class="player-name"><span class="player-name-text">${escapeHtml(player.name)}</span>${snapshot.dealer === player.id ? '<span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span>' : ''}${snapshot.small_blind_player === player.id ? '<span class="blind-chip small-blind-chip" title="Small blind" aria-label="Small blind">SB</span>' : ''}${snapshot.big_blind_player === player.id ? '<span class="blind-chip big-blind-chip" title="Big blind" aria-label="Big blind">BB</span>' : ''}</div>
       <div class="player-hole">${(player.hole_cards || []).map(card).join('')}</div>
       <div class="player-stack">Stack: $${player.stack}</div>
       <div class="player-bet">Street bet: $${player.bet}</div>

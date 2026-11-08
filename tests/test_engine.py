@@ -10,6 +10,38 @@ def game_with_players(count=2, stack=1_000):
     return game
 
 
+@pytest.mark.parametrize("count,expected", [(2, ("p1", "p2")), (3, ("p2", "p3"))])
+def test_blind_player_ids_persist_through_hand_and_reconnect(count, expected):
+    game = game_with_players(count)
+    assert game.snapshot()["small_blind_player"] is None
+    assert game.snapshot()["big_blind_player"] is None
+    game.start_hand()
+    while game.phase != "SHOWDOWN":
+        assert game.place_action(game.current_turn, "call")["ok"]
+        for viewer in [None, *game.player_order]:
+            state = game.snapshot(viewer)
+            assert (state["small_blind_player"], state["big_blind_player"]) == expected
+    game.finalize_showdown()
+    game.add_player(expected[0], "Reconnected")
+    assert game.snapshot()["small_blind_player"] == expected[0]
+    assert game.snapshot()["big_blind_player"] == expected[1]
+
+
+@pytest.mark.parametrize("count,first,second", [
+    (2, ("p1", "p2"), ("p2", "p1")),
+    (3, ("p2", "p3"), ("p3", "p1")),
+])
+def test_blind_player_ids_survive_folds_and_rotate_on_next_deal(count, first, second):
+    game = game_with_players(count)
+    game.start_hand()
+    while game.phase != "WAITING":
+        assert game.place_action(game.current_turn, "fold")["ok"]
+        state = game.snapshot()
+        assert (state["small_blind_player"], state["big_blind_player"]) == first
+    state = game.start_hand()
+    assert (state["small_blind_player"], state["big_blind_player"]) == second
+
+
 def test_heads_up_button_posts_small_blind_and_acts_first_preflop():
     game = game_with_players()
     game.start_hand()
@@ -151,7 +183,7 @@ def test_private_snapshots_only_reveal_the_requesting_player_cards():
     assert opponent["hole_cards"][0]["label"] == "??"
 
 
-def test_big_blind_all_in_for_less_than_small_blind_sets_bet_to_small_blind():
+def test_short_big_blind_keeps_full_bring_in():
     # Regression: a big blind with fewer chips than the small blind went
     # all-in short, leaving current_bet below the small blind's bet. The
     # small blind could then neither check (rejected) nor call (negative
@@ -164,13 +196,14 @@ def test_big_blind_all_in_for_less_than_small_blind_sets_bet_to_small_blind():
     assert game.players["p2"].bet == 10
     assert game.players["p3"].bet == 4
     assert game.players["p3"].all_in
-    assert game.current_bet == 10
+    assert game.current_bet == 20
 
     assert game.current_turn == "p1"
     result = game.place_action("p1", "call")
     assert result["ok"]
-    assert game.players["p1"].bet == 10
+    assert game.players["p1"].bet == 20
 
     assert game.current_turn == "p2"
-    assert game.place_action("p2", "check")["ok"]
+    assert not game.place_action("p2", "check")["ok"]
+    assert game.place_action("p2", "call")["ok"]
     assert game.phase == "FLOP"

@@ -19,6 +19,10 @@ def clean_table():
     server.running = False
     server.MIN_HAND_GAP_SECONDS = 0.01
     server._next_hand_task = None
+    server.TURN_TIMEOUT_SECONDS = 15.0
+    server._turn_timeout_task = None
+    server._turn_timeout_key = None
+    server._pending_action_broadcasts = 0
 
 
 def test_websocket_rejects_actions_from_an_unseated_connection():
@@ -26,6 +30,28 @@ def test_websocket_rejects_actions_from_an_unseated_connection():
         with client.websocket_connect("/ws") as websocket:
             websocket.send_json({"type": "action", "action": "call"})
             assert websocket.receive_json() == {"type": "error", "message": "Join the table first"}
+
+
+@pytest.mark.parametrize("action,amount", [("raise", True), ("raise", 1.5), ([], 0), ("raise", -10), ("check", 0), ("raise", 39), ("call", 10), ("dance", 0)])
+def test_invalid_client_action_preserves_turn_and_chips(action, amount):
+    from copy import deepcopy
+
+    with TestClient(server.app) as client:
+        with client.websocket_connect("/ws") as bot:
+            bot.send_json({"type": "join", "name": "Bot", "player_id": "p1"})
+            bot.receive_json()
+            server.engine.add_player("p2", "Opponent")
+            server.engine.start_hand()
+            before = deepcopy(server.engine.__dict__)
+            bot.send_json({"type": "action", "action": action, "amount": amount})
+            reply = bot.receive_json()
+            assert reply["type"] == "error" or reply["payload"]["ok"] is False
+            assert server.engine.__dict__ == before
+            # The connection survives malformed actions and accepts a valid call.
+            bot.send_json({"type": "action", "action": "call"})
+            while (reply := bot.receive_json())["type"] == "state":
+                pass
+            assert reply["payload"]["ok"]
 
 
 def test_observer_does_not_take_a_poker_seat():

@@ -37,7 +37,7 @@ async def bot(player_id: str, joined: asyncio.Event, start_hand: asyncio.Event, 
             if state.get("current_turn") != player_id:
                 continue
             me = next(player for player in state["players"] if player["id"] == player_id)
-            highest_bet = max(player["bet"] for player in state["players"])
+            highest_bet = state["current_bet"]
             action = "call" if me["bet"] < highest_bet else "check"
             await socket.send(json.dumps({"type": "action", "action": action}))
 
