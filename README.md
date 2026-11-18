@@ -23,11 +23,16 @@ docker compose down
 Settings in [`config.toml`](config.toml):
 
 ```toml
-turn_timeout_seconds = 15
+turn_timeout_seconds = 5
 starting_stack = 1000
 small_blind = 10
 big_blind = 20
+max_hands = 100
 ```
+
+Each connected player starts **every hand with `starting_stack` chips** ($1000
+by default), before blinds. A player's cumulative **profit/loss** is chips won minus
+chips contributed across completed hands. It updates on payout. Highest cumulative profit wins.
 
 ## Connect and join locally
 
@@ -44,8 +49,8 @@ Joining mid-hand waits until the next deal.
 
 Rejoining with the same ID keeps the seat/stack and closes the old socket with
 code `4001`; Disconnecting folds a live non-all-in hand;
-all-in hands and decided showdowns remain eligible. Reconnection does not undo
-a fold or refill chips. Players with zero chips sit out subsequent hands.
+all-in hands and decided showdowns remain eligible. Even players who finish with zero chips receive
+a fresh starting stack next hand.
 
 ## Game state
 
@@ -55,7 +60,11 @@ The payload contains:
 | Field | Meaning |
 |---|---|
 | `phase` | `WAITING`, `PREFLOP`, `FLOP`, `TURN`, `RIVER`, `SHOWDOWN` |
-| `hand_number` | Hand counter; use it to reset per-hand strategy memory |
+| `match_number` | Starts at 1; increments on Restart match. Reset match memory when it changes |
+| `hand_number` | Hand counter within the match |
+| `starting_stack` | Chips each connected player receives before blinds each hand |
+| `max_hands`, `hands_completed` | Configured hand limit and number of settled hands |
+| `match_complete` | `true` after the last payout; no further hands until the instructor restarts the match |
 | `current_turn` | Player ID to act, or `null`; **only act when this is your ID** |
 | `pot` | Committed chips, including this street's bets |
 | `current_bet` | Total street bet to match; use this, not the largest player bet |
@@ -66,12 +75,14 @@ The payload contains:
 | `community_cards` | Board cards: 0 preflop, then 3/4/5 |
 | `players` | Player objects below, in join order |
 | `last_action` | Latest event or `null`; not a complete history |
-| `can_start` | Table idle with enough connected players who have chips; also check `paused` before requesting a deal |
+| `can_start` | Table idle, below the hand limit, with at least two connected players; also check `paused` before requesting a deal |
 | `running`, `paused` | Continuous-play and instructor-pause flags |
 | `speed` | `{"action_delay": seconds, "showdown_reveal": seconds}` |
 
 Each player has `id`, `name`, `stack` (uncommitted chips), `bet` (street
 contribution, reset each street), `folded`, `all_in`, `connected`, and `hole_cards`.
+Each also has `profit_loss` (signed cumulative result) and `hands_played`
+(settled hands dealt to that player). Funding a new hand does not change profit/loss.
 
 A visible card is `{"rank":14,"suit":"spades","label":"AS"}`. Ranks are
 2-14 (J=11, Q=12, K=13, A=14); suits are `hearts`, `diamonds`, `clubs`, `spades`.
@@ -135,7 +146,7 @@ action if it is still your turn; do not repeatedly retry the same invalid move.
 Out-of-turn requests are rejected. Illegal actions may trigger an unchanged
 state broadcast; malformed messages may return only an error.
 
-Each announced turn has **15 seconds by default** to submit a valid action.
+Each announced turn has **5 seconds by default** to submit a valid action.
 Invalid messages and repeated broadcasts do not reset it. On expiry the server
 **checks if allowed, otherwise folds**, then broadcasts the result. The event
 includes `last_action.timeout = {"player":"group-1","action":"fold"}`
