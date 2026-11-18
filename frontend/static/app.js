@@ -52,8 +52,9 @@ function renderSpeed(speed) {
 // owns the running/paused flags; the button only asks to flip them and
 // relabels itself from the next snapshot.
 let gamePlaying = false;
+let gameComplete = false;
 stateEls.playButton.addEventListener('click', () => {
-  socket.send(JSON.stringify({ type: gamePlaying ? 'pause' : 'resume' }));
+  socket.send(JSON.stringify({ type: gameComplete ? 'restart_match' : (gamePlaying ? 'pause' : 'resume') }));
 });
 
 function escapeHtml(value) {
@@ -90,40 +91,12 @@ function playerColor(playerId) {
   return playerColors.get(playerId);
 }
 
-// A bot is eliminated once it sits at $0 with no hand in progress. Stacks can
-// read $0 mid-hand (all-in) or during the showdown reveal (pre-payout), so
-// only WAITING snapshots count. A bot first seen already broke is marked
-// eliminated without a notification, since we never saw it drop out.
-const NOTIFICATION_SECONDS = 6;
-const lastKnownStack = new Map();
-const eliminated = new Set();
-
-function updateEliminations(snapshot) {
-  if (snapshot.phase !== 'WAITING') return;
-  for (const player of snapshot.players || []) {
-    const previous = lastKnownStack.get(player.id);
-    lastKnownStack.set(player.id, player.stack);
-    if (player.stack > 0) {
-      eliminated.delete(player.id);
-    } else if (!eliminated.has(player.id)) {
-      eliminated.add(player.id);
-      if (previous > 0) notifyElimination(player, snapshot.hand_number);
-    }
-  }
+function profitClass(amount) {
+  return amount > 0 ? 'profit' : (amount < 0 ? 'loss' : 'break-even');
 }
 
-function notifyElimination(player, handNumber) {
-  const note = document.createElement('div');
-  note.className = 'notification elimination';
-  note.style.setProperty('--player-color', playerColor(player.id));
-  note.setAttribute('role', 'status');
-  note.innerHTML = `<span class="notification-title">Eliminated</span>
-    <span class="notification-body"><strong>${escapeHtml(player.name)}</strong> busted out on hand ${handNumber}.</span>`;
-  stateEls.notifications.appendChild(note);
-  setTimeout(() => {
-    note.classList.add('leaving');
-    note.addEventListener('animationend', () => note.remove(), { once: true });
-  }, NOTIFICATION_SECONDS * 1000);
+function formatProfit(amount) {
+  return `${amount > 0 ? '+' : (amount < 0 ? '-' : '')}$${Math.abs(amount).toLocaleString()}`;
 }
 
 // Tracks each player's most recent decision so it can render above their
@@ -173,7 +146,7 @@ function renderStackChart(players) {
   const stray = stateEls.stackChart.querySelector('.empty-chart');
   if (stray) stray.remove();
 
-  const ranked = [...players].sort((a, b) => b.stack - a.stack);
+  const ranked = [...players].sort((a, b) => (b.profit_loss || 0) - (a.profit_loss || 0));
   const seen = new Set();
   ranked.forEach((player, index) => {
     seen.add(player.id);
@@ -187,11 +160,12 @@ function renderStackChart(players) {
       stateEls.stackChart.appendChild(row);
       stackRowEls.set(player.id, row);
     }
-    row.title = `${player.name}: $${player.stack}`;
+    const profit = player.profit_loss || 0;
+    row.title = `${player.name}: ${formatProfit(profit)} P/L across ${player.hands_played || 0} hands; hand stack $${player.stack}`;
     row.querySelector('.stack-rank').textContent = `${index + 1}`;
     row.querySelector('.stack-name').textContent = player.name;
-    row.querySelector('.stack-value').textContent = eliminated.has(player.id) ? 'OUT' : `$${player.stack}`;
-    row.classList.toggle('eliminated', eliminated.has(player.id));
+    row.querySelector('.stack-value').textContent = formatProfit(profit);
+    row.querySelector('.stack-value').className = `stack-value ${profitClass(profit)}`;
     row.style.top = `${index * STACK_ROW_HEIGHT}px`;
   });
   for (const [id, row] of stackRowEls) {
@@ -203,53 +177,87 @@ function renderStackChart(players) {
   stateEls.stackChart.style.height = `${ranked.length * STACK_ROW_HEIGHT}px`;
 }
 
+let displayedMatch = 0;
+let displayedHand = -1;
+
+function playerStatus(player, snapshot) {
+  if (!player.connected) return 'Disconnected';
+  if (snapshot.match_complete) return 'Match finished';
+  if (snapshot.phase === 'WAITING') return snapshot.hand_number ? 'Hand finished' : 'Ready';
+  if (!(player.hole_cards || []).length) return 'Joining next hand';
+  if (player.folded) return 'Folded';
+  if (snapshot.phase === 'SHOWDOWN') return 'Showing hand';
+  if (player.all_in) return 'All-in';
+  if (snapshot.current_turn === player.id) return snapshot.paused ? 'Paused — to act' : 'To act';
+  return 'Waiting for turn';
+}
+
 function renderState(snapshot) {
+  const match = snapshot.match_number || 1;
+  // A delayed broadcast from a previous hand/match must not restore its board.
+  if (match < displayedMatch || (match === displayedMatch && snapshot.hand_number < displayedHand)) return;
+  if (match !== displayedMatch || snapshot.hand_number !== displayedHand) {
+    Object.keys(lastActionByPlayer).forEach(key => delete lastActionByPlayer[key]);
+    displayedMatch = match;
+    displayedHand = snapshot.hand_number;
+  }
   const canStart = Boolean(snapshot.can_start);
   const started = Boolean(snapshot.running);
   const gamePaused = Boolean(snapshot.paused);
-  gamePlaying = started && !gamePaused;
-  stateEls.playButton.textContent = gamePlaying ? 'Pause' : (started ? 'Continue' : 'Start');
+  const complete = Boolean(snapshot.match_complete);
+  gameComplete = complete;
+  gamePlaying = started && !gamePaused && !complete;
+  stateEls.playButton.disabled = false;
+  stateEls.playButton.textContent = complete ? 'Restart match' : (gamePlaying ? 'Pause' : (started ? 'Continue' : 'Start'));
   stateEls.playButton.classList.toggle('playing', gamePlaying);
   stateEls.playButton.setAttribute('aria-pressed', String(gamePlaying));
-  stateEls.playStatus.textContent = !started
-    ? 'Not started'
-    : (gamePaused ? `Paused after ${snapshot.hand_number} hands` : `Playing continuously: hand ${snapshot.hand_number}`);
+  stateEls.playStatus.textContent = complete
+    ? `Finished ${snapshot.hands_completed} of ${snapshot.max_hands} hands`
+    : `${gamePaused ? 'Paused' : (started ? 'Playing' : 'Ready')} · Hand ${snapshot.hand_number} of ${snapshot.max_hands} · ${snapshot.hands_completed} completed`;
   renderSpeed(snapshot.speed);
   stateEls.phase.textContent = snapshot.phase;
   stateEls.pot.textContent = `Pot: $${snapshot.pot}`;
   stateEls.tablePhase.textContent = snapshot.phase;
   stateEls.tablePot.textContent = `Pot: $${snapshot.pot}`;
   updateLastActions(snapshot.last_action);
-  updateEliminations(snapshot);
-  const community = (snapshot.community_cards || []).map(card).join('');
-  const placeholders = Array.from({ length: Math.max(0, 5 - (snapshot.community_cards || []).length) }, () => '<div class="card hidden" aria-label="face-down card"></div>').join('');
+  // Retain the result in server snapshots, but clear the visual board between hands.
+  const board = ['WAITING', 'PREFLOP'].includes(snapshot.phase) ? [] : (snapshot.community_cards || []);
+  const community = board.map(card).join('');
+  const placeholders = Array.from({ length: Math.max(0, 5 - board.length) }, () => '<div class="card hidden" aria-label="face-down card"></div>').join('');
   stateEls.community.innerHTML = community + placeholders;
   const players = snapshot.players || [];
   stateEls.players.innerHTML = players.map((player) => {
     const turn = snapshot.current_turn === player.id;
-    const out = eliminated.has(player.id);
-    const state = out ? 'Eliminated' : (player.folded ? 'Folded' : (player.all_in ? 'All-in' : (turn ? 'Acting' : 'Waiting')));
-    return `<div class="player-seat ${turn ? 'current-turn' : ''} ${player.folded ? 'folded' : ''} ${out ? 'eliminated' : ''}" style="--player-color:${playerColor(player.id)}">
+    const state = playerStatus(player, snapshot);
+    return `<div class="player-seat ${turn ? 'current-turn' : ''} ${player.folded && snapshot.phase !== 'WAITING' ? 'folded' : ''}" style="--player-color:${playerColor(player.id)}">
       <div class="player-last-action">${escapeHtml(lastActionByPlayer[player.id] || '')}</div>
       <div class="player-name"><span class="player-name-text">${escapeHtml(player.name)}</span>${snapshot.dealer === player.id ? '<span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span>' : ''}${snapshot.small_blind_player === player.id ? '<span class="blind-chip small-blind-chip" title="Small blind" aria-label="Small blind">SB</span>' : ''}${snapshot.big_blind_player === player.id ? '<span class="blind-chip big-blind-chip" title="Big blind" aria-label="Big blind">BB</span>' : ''}</div>
       <div class="player-hole">${(player.hole_cards || []).map(card).join('')}</div>
-      <div class="player-stack">Stack: $${player.stack}</div>
+      <div class="player-stack">Hand stack: $${player.stack}</div>
       <div class="player-bet">Street bet: $${player.bet}</div>
+      <div class="player-hands">Hands played: ${player.hands_played || 0}</div>
       <div class="player-state">${state}</div>
     </div>`;
   }).join('');
   renderStackChart(players);
   const action = snapshot.last_action;
-  if (gamePaused) {
+  if (complete) {
+    const eligible = players.filter(p => p.hands_played > 0);
+    const best = Math.max(...eligible.map(p => p.profit_loss));
+    const leaders = eligible.filter(p => p.profit_loss === best).map(p => p.name);
+    stateEls.status.textContent = `Match complete. ${leaders.length > 1 ? 'Joint winners' : 'Winner'}: ${leaders.join(', ')} (${formatProfit(best)}). Press Restart match to reset scores and play again with the same bots.`;
+  } else if (gamePaused) {
     stateEls.status.textContent = 'Game paused. Press Continue to resume play.';
-  } else if (!started) {
-    stateEls.status.textContent = canStart ? 'Bots are seated. Press Start to begin continuous play.' : 'Waiting for at least two bots with chips to join.';
+  } else if (snapshot.phase === 'SHOWDOWN') {
+    stateEls.status.textContent = 'Showdown — revealing hands before payout.';
   } else if (action?.type === 'payout') {
     stateEls.status.textContent = `Hand complete — ${Object.keys(action.payouts || {}).join(', ') || action.winners.join(', ')} collected the pot.`;
   } else if (snapshot.current_turn) {
     stateEls.status.textContent = `Hand ${snapshot.hand_number}: waiting for ${snapshot.current_turn}.`;
+  } else if (!started) {
+    stateEls.status.textContent = canStart ? 'Bots are seated. Press Start to begin the match.' : 'Waiting for at least two connected bots to join.';
   } else if (snapshot.phase === 'WAITING' && !canStart) {
-    stateEls.status.textContent = 'Fewer than two bots have chips. Play resumes when more bots join.';
+    stateEls.status.textContent = 'Fewer than two bots are connected. Play resumes when more bots join.';
   } else {
     stateEls.status.textContent = 'Dealing the next hand…';
   }

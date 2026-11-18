@@ -5,7 +5,7 @@ import random
 import pytest
 
 from app.engine import Card, PokerEngine, Suit
-from tests.test_engine import game_with_players
+from tests.test_engine import game_with_players, deal_with_stacks
 
 
 @pytest.mark.parametrize("kwargs", [{"big_blind": True}, {"small_blind": 1.5}, {"starting_stack": "100"}, {"big_blind": 0}, {"small_blind": 30}])
@@ -19,7 +19,7 @@ def test_heads_up_transition_does_not_repeat_big_blind():
     game.start_hand()
     act(game, "fold")
     act(game, "fold")
-    game.players["p1"].stack = 0
+    game.remove_player("p1")
     game.start_hand()
     assert game.dealer == "p3"
     assert game.last_big_blind == "p2"
@@ -100,7 +100,7 @@ def test_cumulative_short_all_ins_reopen_per_player():
     game = game_with_players(5)
     game.players["p5"].stack = 30
     game.players["p2"].stack = 40
-    game.start_hand()
+    deal_with_stacks(game)
     act(game)  # p4 calls 20
     act(game, "raise", 30)  # p5 short all-in
     act(game)  # p1 calls 30
@@ -114,7 +114,7 @@ def test_cumulative_short_all_ins_reopen_per_player():
     game = game_with_players(4)
     game.players["p1"].stack = 30
     game.players["p2"].stack = 40
-    game.start_hand()
+    deal_with_stacks(game)
     act(game)  # p4 calls 20
     act(game, "raise", 30)
     act(game, "raise", 40)
@@ -127,7 +127,7 @@ def test_cumulative_short_all_ins_reopen_per_player():
 def test_checker_can_raise_short_opening_all_in():
     game = game_with_players(3)
     game.players["p3"].stack = 25
-    game.start_hand()
+    deal_with_stacks(game)
     for _ in range(3):
         act(game)
     act(game, "check")  # p2
@@ -139,7 +139,7 @@ def test_checker_can_raise_short_opening_all_in():
 def test_all_in_call_runs_board_and_returns_uncalled_excess():
     game = game_with_players(stack=100)
     game.players["p2"].stack = 50
-    game.start_hand()
+    deal_with_stacks(game)
     act(game, "raise", 100)
     act(game)
     assert game.phase == "SHOWDOWN"
@@ -154,7 +154,7 @@ def test_all_in_call_runs_board_and_returns_uncalled_excess():
 def test_no_betting_against_only_all_in_opponents():
     game = game_with_players(stack=100)
     game.players["p1"].stack = 40
-    game.start_hand()
+    deal_with_stacks(game)
     act(game, "raise", 40)
     assert not game.place_action("p2", "raise", 100)["ok"]
     act(game)
@@ -165,7 +165,7 @@ def test_no_betting_against_only_all_in_opponents():
 def test_heads_up_short_blind_automatically_runs_out_when_nothing_to_call(short_stack):
     game = game_with_players()
     game.players["p1"].stack = short_stack
-    game.start_hand()
+    deal_with_stacks(game)
     if game.phase == "PREFLOP":
         act(game)
     assert game.phase == "SHOWDOWN"
@@ -224,6 +224,7 @@ def test_board_plays_ties_and_odd_chip_left_of_button_with_folded_money():
     assert game.pending_payout == {"p1": 7, "p2": 8}
     game.finalize_showdown()
     assert sum(p.stack for p in game.players.values()) == 3000
+    assert [p.profit_loss for p in game.players.values()] == [2, 3, -5]
 
 
 def test_seeded_legal_hands_conserve_chips_and_terminate():
@@ -233,7 +234,7 @@ def test_seeded_legal_hands_conserve_chips_and_terminate():
         for p in game.players.values():
             p.stack = rng.randint(1, 200)
         total = sum(p.stack for p in game.players.values())
-        game.start_hand()
+        deal_with_stacks(game)
         for _ in range(200):
             assert sum(p.stack for p in game.players.values()) + game.pot == total
             assert all(p.stack >= 0 and p.bet >= 0 for p in game.players.values())

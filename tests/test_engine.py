@@ -10,6 +10,25 @@ def game_with_players(count=2, stack=1_000):
     return game
 
 
+def deal_with_stacks(game):
+    """Arrange unequal remaining stacks for betting edge cases.
+
+    Production hands now start equal; these fixtures model short-stack states
+    to retain coverage of all-in rules independently of match funding.
+    """
+    stacks = {pid: p.stack for pid, p in game.players.items()}
+    game.start_hand()
+    for pid, player in game.players.items():
+        total = stacks[pid]
+        posted = min(total, player.bet)
+        game.pot -= player.bet - posted
+        player.bet = player.hand_contribution = posted
+        player.stack = total - posted
+        player.all_in = player.stack == 0
+    game.current_turn = game._next_actor(game.player_order.index(game.big_blind_player))
+    game._finish_if_ready()
+
+
 @pytest.mark.parametrize("count,expected", [(2, ("p1", "p2")), (3, ("p2", "p3"))])
 def test_blind_player_ids_persist_through_hand_and_reconnect(count, expected):
     game = game_with_players(count)
@@ -113,6 +132,8 @@ def test_short_stack_can_call_all_in_and_side_pot_is_paid_correctly():
     assert game.players["p1"].stack == 150
     assert game.players["p2"].stack == 100
     assert game.players["p3"].stack == 0
+    assert [p.profit_loss for p in game.players.values()] == [100, 0, -100]
+    assert all(p.hands_played == 1 for p in game.players.values())
     assert game.pot == 0
     assert game.phase == "WAITING"
 
@@ -146,7 +167,7 @@ def test_short_all_in_does_not_reopen_raising_for_an_acted_player():
     game.add_player("p2", "Player 2")
     game.add_player("p3", "Player 3")
     game.players["p2"].stack = 25
-    game.start_hand()
+    deal_with_stacks(game)
 
     assert game.place_action("p1", "call")["ok"]
     assert game.current_turn == "p2"
@@ -190,7 +211,7 @@ def test_short_big_blind_keeps_full_bring_in():
     # amount), and a check/call bot looped forever on its turn.
     game = game_with_players(3)
     game.players["p3"].stack = 4
-    game.start_hand()
+    deal_with_stacks(game)
 
     assert game.dealer == "p1"
     assert game.players["p2"].bet == 10

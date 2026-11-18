@@ -37,6 +37,8 @@ class Player:
     bet: int = 0
     hand_contribution: int = 0
     connected: bool = True
+    profit_loss: int = 0
+    hands_played: int = 0
 
     def reset_for_hand(self) -> None:
         self.hole_cards = []
@@ -56,12 +58,18 @@ class PokerEngine:
 
     MAX_PLAYERS = 20
 
-    def __init__(self, starting_stack: int = 1000, small_blind: int = 10, big_blind: int = 20):
+    def __init__(self, starting_stack: int = 1000, small_blind: int = 10, big_blind: int = 20, max_hands: int = 100):
         if any(type(value) is not int for value in (starting_stack, small_blind, big_blind)):
             raise ValueError("Stacks and blinds must be integer chip amounts")
         if min(starting_stack, small_blind, big_blind) <= 0 or small_blind > big_blind:
             raise ValueError("Stacks and blinds must be positive, with small blind <= big blind")
         self.starting_stack, self.small_blind, self.big_blind = starting_stack, small_blind, big_blind
+        if type(max_hands) is not int or max_hands <= 0:
+            raise ValueError("max_hands must be a positive integer")
+        self.max_hands = max_hands
+        self.hands_completed = 0
+        self.match_number = 1
+        self._settled_hand_number = -1
         self.players: OrderedDict[str, Player] = OrderedDict()
         self.player_order: list[str] = []
         self.phase = "WAITING"
@@ -145,7 +153,11 @@ class PokerEngine:
         return self._next_matching(start_index, self._can_act)
 
     def can_start_hand(self) -> bool:
-        return self.phase == "WAITING" and sum(p.connected and p.stack > 0 for p in self.players.values()) >= 2
+        return self.phase == "WAITING" and self.hand_number < self.max_hands and sum(p.connected for p in self.players.values()) >= 2
+
+    @property
+    def match_complete(self) -> bool:
+        return self.hands_completed >= self.max_hands
 
     def _commit(self, player_id: str, amount: int) -> int:
         player = self.players[player_id]
@@ -159,13 +171,17 @@ class PokerEngine:
         return contribution
 
     def start_hand(self) -> dict:
+        if self.hand_number >= self.max_hands:
+            raise ValueError("Hand limit reached; ask the instructor to restart the match")
         if not self.can_start_hand():
-            raise ValueError("At least two connected players with chips are required to start a hand")
+            raise ValueError("An idle table and at least two connected players are required to start a hand")
         self.hand_number += 1
         self.phase, self.community_cards, self.pot = "PREFLOP", [], 0
         self.current_bet, self.minimum_raise, self.round_acted, self.acted_at = 0, self.big_blind, set(), {}
         self.deck = self._build_deck()
         for player in self.players.values():
+            if player.connected:
+                player.stack = self.starting_stack
             player.reset_for_hand()
         next_dealer = self._next_matching(self.dealer_index, lambda pid: self.players[pid].connected and self.players[pid].stack > 0)
         self.dealer_index = self.player_order.index(next_dealer)
@@ -319,9 +335,8 @@ class PokerEngine:
         if len(contenders) <= 1:
             if contenders:
                 winner = contenders[0]
-                self.players[winner].stack += self.pot
                 self.last_action = {"type": "payout", "winners": [winner], "pot": self.pot}
-            self.pot, self.current_turn, self.phase = 0, None, "WAITING"
+            self._pay_out({contenders[0]: self.pot} if contenders else {})
             return
         scores = {pid: self.evaluate_best_hand(self.players[pid].hole_cards + self.community_cards) for pid in contenders}
         payouts: dict[str, int] = {}
@@ -350,9 +365,21 @@ class PokerEngine:
     def finalize_showdown(self) -> None:
         if self.phase != "SHOWDOWN" or self.pending_payout is None:
             return
-        for pid, amount in self.pending_payout.items():
-            self.players[pid].stack += amount
+        self._pay_out(self.pending_payout)
         self.pending_payout = None
+
+    def _pay_out(self, payouts: dict[str, int]) -> None:
+        """Settle each dealt player's net result once, including disconnected folds."""
+        if self._settled_hand_number == self.hand_number:
+            return
+        for pid, player in self.players.items():
+            if player.hole_cards:
+                won = payouts.get(pid, 0)
+                player.stack += won
+                player.profit_loss += won - player.hand_contribution
+                player.hands_played += 1
+        self._settled_hand_number = self.hand_number
+        self.hands_completed += 1
         self.pot, self.current_turn, self.phase = 0, None, "WAITING"
 
     @property
@@ -364,8 +391,11 @@ class PokerEngine:
         for pid, p in self.players.items():
             reveal = player_id == pid or (self.phase == "SHOWDOWN" and not p.folded)
             cards = [c.to_dict() for c in p.hole_cards] if reveal else [{"rank": "?", "suit": "?", "label": "??"} for _ in p.hole_cards]
-            players.append({"id": p.player_id, "name": p.name, "stack": p.stack, "bet": p.bet, "folded": p.folded, "all_in": p.all_in, "connected": p.connected, "hole_cards": cards})
-        return {"phase": self.phase, "pot": self.pot, "community_cards": [c.to_dict() for c in self.community_cards], "players": players, "current_turn": self.current_turn, "dealer": self.dealer, "small_blind_player": self.small_blind_player, "big_blind_player": self.big_blind_player, "hand_number": self.hand_number, "last_action": self.last_action, "small_blind": self.small_blind, "big_blind": self.big_blind, "current_bet": self.current_bet, "minimum_raise": self.minimum_raise}
+            players.append({"id": p.player_id, "name": p.name, "stack": p.stack, "bet": p.bet, "folded": p.folded, "all_in": p.all_in, "connected": p.connected, "hole_cards": cards, "profit_loss": p.profit_loss, "hands_played": p.hands_played})
+        return {"phase": self.phase, "pot": self.pot, "community_cards": [c.to_dict() for c in self.community_cards], "players": players, "current_turn": self.current_turn, "dealer": self.dealer, "small_blind_player": self.small_blind_player, "big_blind_player": self.big_blind_player, "hand_number": self.hand_number, "last_action": self.last_action, "small_blind": self.small_blind, "big_blind": self.big_blind, "current_bet": self.current_bet, "minimum_raise": self.minimum_raise,
+                "starting_stack": self.starting_stack, "max_hands": self.max_hands,
+                "hands_completed": self.hands_completed, "match_complete": self.match_complete,
+                "match_number": self.match_number}
 
     @staticmethod
     def _straight_high(ranks: list[int]) -> Optional[int]:
