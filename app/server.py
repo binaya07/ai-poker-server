@@ -27,7 +27,8 @@ async def lifespan(app):
 
 app = FastAPI(title="Poker AI Final Showdown", lifespan=lifespan)
 engine = PokerEngine(starting_stack=settings.starting_stack,
-                     small_blind=settings.small_blind, big_blind=settings.big_blind)
+                     small_blind=settings.small_blind, big_blind=settings.big_blind,
+                     max_hands=settings.max_hands)
 connections: Dict[str, WebSocket] = {}
 spectators: set[WebSocket] = set()
 # How long a contested showdown holds with hole cards revealed before the
@@ -110,6 +111,7 @@ async def _expire_turn(key):
 async def _publish_accepted_action(websocket=None, result=None):
     """Do not charge the next turn while an accepted action is being paced."""
     global _pending_action_broadcasts
+    action_engine = engine
     _pending_action_broadcasts += 1
     try:
         if websocket is not None:
@@ -118,7 +120,33 @@ async def _publish_accepted_action(websocket=None, result=None):
             await asyncio.sleep(ACTION_DELAY_SECONDS)
         await _wait_while_paused()
     finally:
-        _pending_action_broadcasts -= 1
+        if engine is action_engine:
+            _pending_action_broadcasts -= 1
+    if engine is action_engine:
+        await broadcast_state()
+
+
+async def _restart_match() -> None:
+    """Keep seats/sockets and pacing, but reset all match results and timers."""
+    global engine, running, paused, _showdown_reveal_task, _next_hand_task, _pending_action_broadcasts
+    previous = engine
+    replacement = PokerEngine(starting_stack=previous.starting_stack,
+                              small_blind=previous.small_blind, big_blind=previous.big_blind,
+                              max_hands=previous.max_hands)
+    replacement.match_number = previous.match_number + 1
+    for pid, player in previous.players.items():
+        replacement.add_player(pid, player.name)
+        replacement.players[pid].connected = player.connected
+    tasks = [_turn_timeout_task, _showdown_reveal_task, _next_hand_task]
+    engine = replacement
+    _cancel_turn_timeout()
+    for task in tasks:
+        if task is not None:
+            task.cancel()
+    _showdown_reveal_task = _next_hand_task = None
+    _pending_action_broadcasts = 0
+    running, paused = True, False
+    await asyncio.gather(*(task for task in tasks if task is not None), return_exceptions=True)
     await broadcast_state()
 
 
@@ -200,6 +228,9 @@ async def _finalize_showdown_after_delay() -> None:
 
 async def broadcast_state() -> None:
     """Send every bot its own private cards and observers only the public table."""
+    global running
+    if engine.match_complete:
+        running = False
     controls = _table_controls()
     for pid, websocket in list(connections.items()):
         payload = engine.snapshot(pid)
@@ -296,11 +327,23 @@ async def websocket_endpoint(websocket: WebSocket):
                 if paused:
                     await websocket.send_json({"type": "error", "message": "The game is paused; press Continue first"})
                     continue
+                if engine.match_complete:
+                    await websocket.send_json({"type": "error", "message": "Match complete; ask the instructor to restart the match"})
+                    continue
                 if not engine.can_start_hand():
-                    await websocket.send_json({"type": "error", "message": "Need at least two connected players with chips to start"})
+                    await websocket.send_json({"type": "error", "message": "Need an idle table and at least two connected players to start"})
                     continue
                 engine.start_hand()
                 await broadcast_state()
+                continue
+            if msg_type == "restart_match":
+                if not is_observer:
+                    await websocket.send_json({"type": "error", "message": "Only an instructor observer may restart the match"})
+                    continue
+                if not engine.match_complete:
+                    await websocket.send_json({"type": "error", "message": "The match must finish before it can be restarted"})
+                    continue
+                await _restart_match()
                 continue
             if msg_type == "set_speed":
                 if not is_observer:
@@ -317,6 +360,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg_type in ("pause", "resume"):
                 if not is_observer:
                     await websocket.send_json({"type": "error", "message": "Only an instructor observer may pause or resume the game"})
+                    continue
+                if engine.match_complete:
+                    await websocket.send_json({"type": "error", "message": "Match complete; ask the instructor to restart the match"})
                     continue
                 # "resume" doubles as Start: it switches the table into
                 # continuous play, dealing right away if the table is idle.

@@ -19,7 +19,7 @@ def clean_table():
     server.running = False
     server.MIN_HAND_GAP_SECONDS = 0.01
     server._next_hand_task = None
-    server.TURN_TIMEOUT_SECONDS = 15.0
+    server.TURN_TIMEOUT_SECONDS = 5.0
     server._turn_timeout_task = None
     server._turn_timeout_key = None
     server._pending_action_broadcasts = 0
@@ -297,7 +297,7 @@ def test_hands_cannot_start_while_paused():
             assert instructor.receive_json() == {"type": "error", "message": "The game is paused; press Continue first"}
 
 
-def test_start_hand_requires_two_players_with_chips():
+def test_start_hand_requires_two_connected_players():
     with TestClient(server.app) as client:
         with client.websocket_connect("/ws") as websocket_one, client.websocket_connect("/ws") as websocket_two:
             websocket_one.send_json({"type": "join", "name": "Bot One", "player_id": "bot-1"})
@@ -307,3 +307,33 @@ def test_start_hand_requires_two_players_with_chips():
             websocket_two.send_json({"type": "join", "name": "Bot Two", "player_id": "bot-2"})
             assert websocket_two.receive_json()["type"] == "state"
             assert server.engine.can_start_hand() is True
+
+
+def test_continuous_match_stops_at_limit_and_rejects_restart_messages():
+    server.engine.max_hands = 2
+    with TestClient(server.app) as client:
+        with client.websocket_connect("/ws") as instructor, client.websocket_connect("/ws") as one, client.websocket_connect("/ws") as two:
+            # Deal the first hand, then enable continuous play for subsequent hands.
+            state = _seat_two_bots_and_deal(instructor, one, two)
+            instructor.send_json({"type": "resume"})
+            state = instructor.receive_json()["payload"]
+            sockets = {"bot-1": one, "bot-2": two}
+            for hand in (1, 2):
+                assert state["hand_number"] == hand
+                sockets[state["current_turn"]].send_json({"type": "action", "action": "fold"})
+                state = instructor.receive_json()["payload"]
+                assert state["phase"] == "WAITING"
+                assert state["hands_completed"] == hand
+                if hand == 1:
+                    assert state["running"] and not state["match_complete"]
+                    state = instructor.receive_json()["payload"]
+                    assert all(p["stack"] + p["bet"] == 1000 for p in state["players"])
+            assert state["match_complete"] and not state["running"] and not state["can_start"]
+            assert all(p["hands_played"] == 2 for p in state["players"])
+            assert sum(p["profit_loss"] for p in state["players"]) == 0
+            for command in ("resume", "start_hand"):
+                instructor.send_json({"type": command})
+                reply = instructor.receive_json()
+                assert reply["type"] == "error"
+                assert "Match complete" in reply["message"]
+            assert server.engine.hand_number == 2
