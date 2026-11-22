@@ -327,7 +327,7 @@ def test_continuous_match_stops_at_limit_and_rejects_restart_messages():
                 if hand == 1:
                     assert state["running"] and not state["match_complete"]
                     state = instructor.receive_json()["payload"]
-                    assert all(p["stack"] + p["bet"] == 1000 for p in state["players"])
+                    assert [p["stack"] + p["bet"] for p in state["players"]] == [990, 1010]
             assert state["match_complete"] and not state["running"] and not state["can_start"]
             assert all(p["hands_played"] == 2 for p in state["players"])
             assert sum(p["profit_loss"] for p in state["players"]) == 0

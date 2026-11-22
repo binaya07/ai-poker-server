@@ -331,7 +331,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "message": "Match complete; ask the instructor to restart the match"})
                     continue
                 if not engine.can_start_hand():
-                    await websocket.send_json({"type": "error", "message": "Need an idle table and at least two connected players to start"})
+                    await websocket.send_json({"type": "error", "message": "Need an idle table and at least two connected players with chips to start"})
                     continue
                 engine.start_hand()
                 await broadcast_state()

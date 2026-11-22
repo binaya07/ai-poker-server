@@ -11,22 +11,8 @@ def game_with_players(count=2, stack=1_000):
 
 
 def deal_with_stacks(game):
-    """Arrange unequal remaining stacks for betting edge cases.
-
-    Production hands now start equal; these fixtures model short-stack states
-    to retain coverage of all-in rules independently of match funding.
-    """
-    stacks = {pid: p.stack for pid, p in game.players.items()}
-    game.start_hand()
-    for pid, player in game.players.items():
-        total = stacks[pid]
-        posted = min(total, player.bet)
-        game.pot -= player.bet - posted
-        player.bet = player.hand_contribution = posted
-        player.stack = total - posted
-        player.all_in = player.stack == 0
-    game.current_turn = game._next_actor(game.player_order.index(game.big_blind_player))
-    game._finish_if_ready()
+    """Deal using the players' existing bankrolls for betting edge cases."""
+    return game.start_hand()
 
 
 @pytest.mark.parametrize("count,expected", [(2, ("p1", "p2")), (3, ("p2", "p3"))])

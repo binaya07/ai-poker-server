@@ -17,7 +17,7 @@ def test_observer_restarts_match_without_reconnecting_bots():
             assert observer.receive_json()["payload"]["match_complete"]
             observer.send_json({"type": "restart_match"})
             reset = observer.receive_json()["payload"]
-            assert reset["match_number"] == 2
+            assert "match_number" not in reset
             assert reset["hand_number"] == reset["hands_completed"] == 0
             assert reset["running"] and not reset["paused"] and not reset["match_complete"]
             assert reset["community_cards"] == [] and reset["last_action"] is None
@@ -26,7 +26,7 @@ def test_observer_restarts_match_without_reconnecting_bots():
             assert all(p["connected"] and not p["hole_cards"] for p in reset["players"])
             state = observer.receive_json()["payload"]
             assert state["phase"] == "PREFLOP" and state["hand_number"] == 1
-            assert state["match_number"] == 2 and state["community_cards"] == []
+            assert "match_number" not in state and state["community_cards"] == []
             sockets[state["current_turn"]].send_json({"type": "action", "action": "call"})
             assert observer.receive_json()["payload"]["current_turn"] == "bot-2"
 

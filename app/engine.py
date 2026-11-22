@@ -68,6 +68,7 @@ class PokerEngine:
             raise ValueError("max_hands must be a positive integer")
         self.max_hands = max_hands
         self.hands_completed = 0
+        self._bankroll_finished = False
         self.match_number = 1
         self._settled_hand_number = -1
         self.players: OrderedDict[str, Player] = OrderedDict()
@@ -153,11 +154,11 @@ class PokerEngine:
         return self._next_matching(start_index, self._can_act)
 
     def can_start_hand(self) -> bool:
-        return self.phase == "WAITING" and self.hand_number < self.max_hands and sum(p.connected for p in self.players.values()) >= 2
+        return self.phase == "WAITING" and not self.match_complete and sum(p.connected and p.stack > 0 for p in self.players.values()) >= 2
 
     @property
     def match_complete(self) -> bool:
-        return self.hands_completed >= self.max_hands
+        return self.hands_completed >= self.max_hands or self._bankroll_finished
 
     def _commit(self, player_id: str, amount: int) -> int:
         player = self.players[player_id]
@@ -173,15 +174,15 @@ class PokerEngine:
     def start_hand(self) -> dict:
         if self.hand_number >= self.max_hands:
             raise ValueError("Hand limit reached; ask the instructor to restart the match")
+        if self.match_complete:
+            raise ValueError("Match complete; ask the instructor to restart the match")
         if not self.can_start_hand():
-            raise ValueError("An idle table and at least two connected players are required to start a hand")
+            raise ValueError("An idle table and at least two connected players with chips are required to start a hand")
         self.hand_number += 1
         self.phase, self.community_cards, self.pot = "PREFLOP", [], 0
         self.current_bet, self.minimum_raise, self.round_acted, self.acted_at = 0, self.big_blind, set(), {}
         self.deck = self._build_deck()
         for player in self.players.values():
-            if player.connected:
-                player.stack = self.starting_stack
             player.reset_for_hand()
         next_dealer = self._next_matching(self.dealer_index, lambda pid: self.players[pid].connected and self.players[pid].stack > 0)
         self.dealer_index = self.player_order.index(next_dealer)
@@ -380,6 +381,9 @@ class PokerEngine:
                 player.hands_played += 1
         self._settled_hand_number = self.hand_number
         self.hands_completed += 1
+        # Count disconnected bankrolls too: a disconnection alone should not
+        # end a match that can continue when those players reconnect.
+        self._bankroll_finished = sum(p.stack > 0 for p in self.players.values()) < 2
         self.pot, self.current_turn, self.phase = 0, None, "WAITING"
 
     @property
@@ -394,8 +398,7 @@ class PokerEngine:
             players.append({"id": p.player_id, "name": p.name, "stack": p.stack, "bet": p.bet, "folded": p.folded, "all_in": p.all_in, "connected": p.connected, "hole_cards": cards, "profit_loss": p.profit_loss, "hands_played": p.hands_played})
         return {"phase": self.phase, "pot": self.pot, "community_cards": [c.to_dict() for c in self.community_cards], "players": players, "current_turn": self.current_turn, "dealer": self.dealer, "small_blind_player": self.small_blind_player, "big_blind_player": self.big_blind_player, "hand_number": self.hand_number, "last_action": self.last_action, "small_blind": self.small_blind, "big_blind": self.big_blind, "current_bet": self.current_bet, "minimum_raise": self.minimum_raise,
                 "starting_stack": self.starting_stack, "max_hands": self.max_hands,
-                "hands_completed": self.hands_completed, "match_complete": self.match_complete,
-                "match_number": self.match_number}
+                "hands_completed": self.hands_completed, "match_complete": self.match_complete}
 
     @staticmethod
     def _straight_high(ranks: list[int]) -> Optional[int]:

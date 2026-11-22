@@ -455,9 +455,6 @@ button:disabled {
   white-space: normal;
 }
 
-.profit { color: #69db7c; }
-.loss { color: #ff6b6b; }
-.break-even { color: var(--text-soft); }
 .leaderboard-note { color: var(--text-soft); font-size: 0.75rem; margin: 0 0 12px; }
 .play-button:disabled { cursor: default; opacity: 0.65; }
 

@@ -30,9 +30,10 @@ big_blind = 20
 max_hands = 100
 ```
 
-Each connected player starts **every hand with `starting_stack` chips** ($1000
-by default), before blinds. A player's cumulative **profit/loss** is chips won minus
-chips contributed across completed hands. It updates on payout. Highest cumulative profit wins.
+Each player receives **`starting_stack` chips once per match** ($1000 by default).
+Winnings and losses carry between hands. The UI displays available chips. The match 
+ends after `max_hands` or when only one
+player has chips left; highest chip total wins. **Restart match** resets all stacks.
 
 ## Connect and join locally
 
@@ -48,9 +49,7 @@ One socket controls one player. A successful join returns `state`.
 Joining mid-hand waits until the next deal.
 
 Rejoining with the same ID keeps the seat/stack and closes the old socket with
-code `4001`; Disconnecting folds a live non-all-in hand;
-all-in hands and decided showdowns remain eligible. Even players who finish with zero chips receive
-a fresh starting stack next hand.
+code `4001`; Disconnecting folds a live non-all-in hand.
 
 ## Game state
 
@@ -60,11 +59,9 @@ The payload contains:
 | Field | Meaning |
 |---|---|
 | `phase` | `WAITING`, `PREFLOP`, `FLOP`, `TURN`, `RIVER`, `SHOWDOWN` |
-| `match_number` | Starts at 1; increments on Restart match. Reset match memory when it changes |
-| `hand_number` | Hand counter within the match |
-| `starting_stack` | Chips each connected player receives before blinds each hand |
+| `starting_stack` | Initial chips per player per match, before blinds |
 | `max_hands`, `hands_completed` | Configured hand limit and number of settled hands |
-| `match_complete` | `true` after the last payout; no further hands until the instructor restarts the match |
+| `match_complete` | `true` after payout when the hand limit is reached or only one bankroll remains; no further hands until restart |
 | `current_turn` | Player ID to act, or `null`; **only act when this is your ID** |
 | `pot` | Committed chips, including this street's bets |
 | `current_bet` | Total street bet to match; use this, not the largest player bet |
@@ -75,14 +72,12 @@ The payload contains:
 | `community_cards` | Board cards: 0 preflop, then 3/4/5 |
 | `players` | Player objects below, in join order |
 | `last_action` | Latest event or `null`; not a complete history |
-| `can_start` | Table idle, below the hand limit, with at least two connected players; also check `paused` before requesting a deal |
+| `can_start` | Table idle, match unfinished, with at least two connected players with chips; also check `paused` before requesting a deal |
 | `running`, `paused` | Continuous-play and instructor-pause flags |
 | `speed` | `{"action_delay": seconds, "showdown_reveal": seconds}` |
 
 Each player has `id`, `name`, `stack` (uncommitted chips), `bet` (street
 contribution, reset each street), `folded`, `all_in`, `connected`, and `hole_cards`.
-Each also has `profit_loss` (signed cumulative result) and `hands_played`
-(settled hands dealt to that player). Funding a new hand does not change profit/loss.
 
 A visible card is `{"rank":14,"suit":"spades","label":"AS"}`. Ranks are
 2-14 (J=11, Q=12, K=13, A=14); suits are `hearts`, `diamonds`, `clubs`, `spades`.

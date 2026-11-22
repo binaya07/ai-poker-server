@@ -1,10 +1,53 @@
 import pytest
 
+from app.engine import PokerEngine
 from tests.test_engine import game_with_players
 from tests.test_rules import cards
 
 
-def test_each_hand_resets_stacks_and_carries_only_net_profit():
+def test_configured_bankroll_is_granted_once_and_conserved_across_hands():
+    game = PokerEngine(starting_stack=250, small_blind=5, big_blind=10)
+    game.add_player("a", "A")
+    game.add_player("b", "B")
+    for _ in range(6):
+        previous = {pid: p.stack for pid, p in game.players.items()}
+        game.start_hand()
+        assert all(p.stack + p.bet == previous[pid] for pid, p in game.players.items())
+        game.place_action(game.current_turn, "fold")
+        assert sum(p.stack for p in game.players.values()) == 500
+    game.remove_player("a")
+    previous = game.players["a"].stack
+    game.add_player("a", "Reconnected")
+    assert game.players["a"].stack == previous
+
+
+def test_busted_player_is_skipped_while_two_bankrolls_can_continue():
+    game = game_with_players(3)
+    game.players["p1"].stack = 0
+    game.players["p2"].stack = 2000
+    game.start_hand()
+    assert not game.players["p1"].hole_cards
+    assert "p1" not in (game.dealer, game.small_blind_player, game.big_blind_player, game.current_turn)
+    game.place_action(game.current_turn, "fold")
+    assert not game.match_complete
+    assert game.can_start_hand()
+    assert game.players["p1"].stack == 0
+    assert sum(p.stack for p in game.players.values()) == 3000
+
+
+def test_disconnected_bankroll_does_not_end_match_and_reconnect_resumes():
+    game = game_with_players()
+    game.start_hand()
+    game.remove_player("p1")
+    assert game.phase == "WAITING"
+    assert not game.match_complete
+    assert not game.can_start_hand()
+    game.add_player("p1", "Back")
+    assert game.players["p1"].stack == 990
+    assert game.can_start_hand()
+
+
+def test_each_hand_carries_winnings_and_losses_without_new_funding():
     game = game_with_players()
     game.start_hand()
     game.place_action("p1", "fold")
@@ -12,16 +55,17 @@ def test_each_hand_resets_stacks_and_carries_only_net_profit():
     assert [p.profit_loss for p in game.players.values()] == [-10, 10]
     assert [p.hands_played for p in game.players.values()] == [1, 1]
     state = game.start_hand()
-    assert all(p.stack + p.bet == 1000 for p in game.players.values())
+    assert [p.stack + p.bet for p in game.players.values()] == [990, 1010]
     assert [p["profit_loss"] for p in state["players"]] == [-10, 10]
     assert state["starting_stack"] == 1000
     game.place_action("p2", "fold")
     assert [p.profit_loss for p in game.players.values()] == [0, 0]
     assert game.hands_completed == 2
+    assert [p.stack for p in game.players.values()] == [1000, 1000]
     assert all(p.hands_played == 2 for p in game.players.values())
 
 
-def test_all_in_loss_does_not_eliminate_player_and_scores_only_after_payout():
+def test_all_in_loss_ends_match_after_payout_when_only_one_bankroll_remains():
     game = game_with_players()
     game.start_hand()
     game.players["p1"].hole_cards = cards("As Ad")
@@ -38,10 +82,13 @@ def test_all_in_loss_does_not_eliminate_player_and_scores_only_after_payout():
     before = game.snapshot()
     game.finalize_showdown()
     assert game.snapshot() == before
-    assert game.can_start_hand()
-    game.start_hand()
-    assert all(p.stack + p.bet == 1000 and p.hole_cards and not p.folded for p in game.players.values())
-    assert [p.profit_loss for p in game.players.values()] == [1000, -1000]
+    assert game.match_complete
+    assert not game.can_start_hand()
+    with pytest.raises(ValueError, match="Match complete"):
+        game.start_hand()
+    game.add_player("late", "Late")
+    assert game.match_complete  # A new join cannot undo a completed match.
+    assert game.players["p2"].stack == 0
 
 
 def test_disconnect_and_late_join_do_not_erase_or_invent_results():
@@ -61,7 +108,7 @@ def test_disconnect_and_late_join_do_not_erase_or_invent_results():
     assert game.players["p2"].profit_loss == -10
     assert game.players["p2"].stack == 990
     game.start_hand()
-    assert game.players["p2"].stack + game.players["p2"].bet == 1000
+    assert game.players["p2"].stack + game.players["p2"].bet == 990
     assert game.players["p2"].profit_loss == -10
 
 
