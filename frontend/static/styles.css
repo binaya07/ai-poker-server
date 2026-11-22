@@ -200,7 +200,7 @@ button:disabled {
   }
 
   .chip-stacks-panel {
-    width: 320px;
+    width: 360px;
     flex-shrink: 0;
   }
 
@@ -245,6 +245,7 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
   font-size: 0.85rem;
   font-weight: 700;
 }
@@ -252,7 +253,7 @@ button:disabled {
 .stack-value {
   flex-shrink: 0;
   color: var(--text-soft);
-  font-size: 1.3rem;
+  font-size: 1.1rem;
   font-weight: 700;
   text-align: right;
 }
@@ -397,12 +398,14 @@ button:disabled {
 
 .player-name {
   display: flex;
+  min-width: 0;
   align-items: center;
   font-weight: 700;
   margin-bottom: 6px;
 }
 
 .player-name-text {
+  flex: 0 1 auto;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -455,7 +458,6 @@ button:disabled {
   white-space: normal;
 }
 
-.leaderboard-note { color: var(--text-soft); font-size: 0.75rem; margin: 0 0 12px; }
 .play-button:disabled { cursor: default; opacity: 0.65; }
 
 .player-state {

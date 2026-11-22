@@ -159,6 +159,7 @@ function renderStackChart(players) {
     row.title = `${player.name}: ${formatChips(player.stack)} available chips; ${player.hands_played || 0} hands played`;
     row.querySelector('.stack-rank').textContent = `${index + 1}`;
     row.querySelector('.stack-name').textContent = player.name;
+    row.querySelector('.stack-name').title = player.name;
     row.querySelector('.stack-value').textContent = formatChips(player.stack);
     row.querySelector('.stack-value').className = 'stack-value';
     row.style.top = `${index * STACK_ROW_HEIGHT}px`;
@@ -226,7 +227,7 @@ function renderState(snapshot) {
     const state = playerStatus(player, snapshot);
     return `<div class="player-seat ${turn ? 'current-turn' : ''} ${player.folded && snapshot.phase !== 'WAITING' ? 'folded' : ''}" style="--player-color:${playerColor(player.id)}">
       <div class="player-last-action">${escapeHtml(lastActionByPlayer[player.id] || '')}</div>
-      <div class="player-name"><span class="player-name-text">${escapeHtml(player.name)}</span>${snapshot.dealer === player.id ? '<span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span>' : ''}${snapshot.small_blind_player === player.id ? '<span class="blind-chip small-blind-chip" title="Small blind" aria-label="Small blind">SB</span>' : ''}${snapshot.big_blind_player === player.id ? '<span class="blind-chip big-blind-chip" title="Big blind" aria-label="Big blind">BB</span>' : ''}</div>
+      <div class="player-name"><span class="player-name-text" title="${escapeHtml(player.name)}">${escapeHtml(player.name)}</span>${snapshot.dealer === player.id ? '<span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span>' : ''}${snapshot.small_blind_player === player.id ? '<span class="blind-chip small-blind-chip" title="Small blind" aria-label="Small blind">SB</span>' : ''}${snapshot.big_blind_player === player.id ? '<span class="blind-chip big-blind-chip" title="Big blind" aria-label="Big blind">BB</span>' : ''}</div>
       <div class="player-hole">${(player.hole_cards || []).map(card).join('')}</div>
       <div class="player-stack">Chips: ${formatChips(player.stack)}</div>
       <div class="player-bet">Street bet: $${player.bet}</div>
