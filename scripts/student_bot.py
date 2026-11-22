@@ -21,10 +21,12 @@ async def run_bot(player_id, url):
                     print("Rejected:", message["payload"]["error"], flush=True)
             elif message["type"] == "state":
                 state = message["payload"]
+                if state["hand_number"] == 0:
+                    pending, last_turn = False, None
                 if pending or state["current_turn"] != player_id:
                     continue
                 # Repeated broadcasts are not necessarily new turns.
-                turn = (state["match_number"], state["hand_number"], state["phase"], state["current_bet"],
+                turn = (state["hand_number"], state["phase"], state["current_bet"],
                         tuple((p["id"], p["bet"], p["folded"], p["all_in"]) for p in state["players"]))
                 if turn == last_turn:
                     continue

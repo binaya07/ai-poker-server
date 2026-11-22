@@ -91,12 +91,8 @@ function playerColor(playerId) {
   return playerColors.get(playerId);
 }
 
-function profitClass(amount) {
-  return amount > 0 ? 'profit' : (amount < 0 ? 'loss' : 'break-even');
-}
-
-function formatProfit(amount) {
-  return `${amount > 0 ? '+' : (amount < 0 ? '-' : '')}$${Math.abs(amount).toLocaleString()}`;
+function formatChips(amount) {
+  return `$${amount.toLocaleString()}`;
 }
 
 // Tracks each player's most recent decision so it can render above their
@@ -146,7 +142,7 @@ function renderStackChart(players) {
   const stray = stateEls.stackChart.querySelector('.empty-chart');
   if (stray) stray.remove();
 
-  const ranked = [...players].sort((a, b) => (b.profit_loss || 0) - (a.profit_loss || 0));
+  const ranked = [...players].sort((a, b) => b.stack - a.stack);
   const seen = new Set();
   ranked.forEach((player, index) => {
     seen.add(player.id);
@@ -160,12 +156,12 @@ function renderStackChart(players) {
       stateEls.stackChart.appendChild(row);
       stackRowEls.set(player.id, row);
     }
-    const profit = player.profit_loss || 0;
-    row.title = `${player.name}: ${formatProfit(profit)} P/L across ${player.hands_played || 0} hands; hand stack $${player.stack}`;
+    row.title = `${player.name}: ${formatChips(player.stack)} available chips; ${player.hands_played || 0} hands played`;
     row.querySelector('.stack-rank').textContent = `${index + 1}`;
     row.querySelector('.stack-name').textContent = player.name;
-    row.querySelector('.stack-value').textContent = formatProfit(profit);
-    row.querySelector('.stack-value').className = `stack-value ${profitClass(profit)}`;
+    row.querySelector('.stack-name').title = player.name;
+    row.querySelector('.stack-value').textContent = formatChips(player.stack);
+    row.querySelector('.stack-value').className = 'stack-value';
     row.style.top = `${index * STACK_ROW_HEIGHT}px`;
   });
   for (const [id, row] of stackRowEls) {
@@ -177,12 +173,13 @@ function renderStackChart(players) {
   stateEls.stackChart.style.height = `${ranked.length * STACK_ROW_HEIGHT}px`;
 }
 
-let displayedMatch = 0;
 let displayedHand = -1;
 
 function playerStatus(player, snapshot) {
   if (!player.connected) return 'Disconnected';
   if (snapshot.match_complete) return 'Match finished';
+  if (player.stack === 0 && !player.all_in) return 'Out of chips';
+  if (snapshot.phase === 'WAITING' && player.stack === 0) return 'Out of chips';
   if (snapshot.phase === 'WAITING') return snapshot.hand_number ? 'Hand finished' : 'Ready';
   if (!(player.hole_cards || []).length) return 'Joining next hand';
   if (player.folded) return 'Folded';
@@ -193,12 +190,11 @@ function playerStatus(player, snapshot) {
 }
 
 function renderState(snapshot) {
-  const match = snapshot.match_number || 1;
-  // A delayed broadcast from a previous hand/match must not restore its board.
-  if (match < displayedMatch || (match === displayedMatch && snapshot.hand_number < displayedHand)) return;
-  if (match !== displayedMatch || snapshot.hand_number !== displayedHand) {
+  // Restart broadcasts the existing empty hand-zero state before dealing.
+  const reset = snapshot.hand_number === 0 && snapshot.phase === 'WAITING' && snapshot.last_action == null;
+  if (!reset && snapshot.hand_number < displayedHand) return;
+  if (reset || snapshot.hand_number !== displayedHand) {
     Object.keys(lastActionByPlayer).forEach(key => delete lastActionByPlayer[key]);
-    displayedMatch = match;
     displayedHand = snapshot.hand_number;
   }
   const canStart = Boolean(snapshot.can_start);
@@ -212,7 +208,7 @@ function renderState(snapshot) {
   stateEls.playButton.classList.toggle('playing', gamePlaying);
   stateEls.playButton.setAttribute('aria-pressed', String(gamePlaying));
   stateEls.playStatus.textContent = complete
-    ? `Finished ${snapshot.hands_completed} of ${snapshot.max_hands} hands`
+    ? `Match finished after ${snapshot.hands_completed} hands (limit ${snapshot.max_hands})`
     : `${gamePaused ? 'Paused' : (started ? 'Playing' : 'Ready')} · Hand ${snapshot.hand_number} of ${snapshot.max_hands} · ${snapshot.hands_completed} completed`;
   renderSpeed(snapshot.speed);
   stateEls.phase.textContent = snapshot.phase;
@@ -231,9 +227,9 @@ function renderState(snapshot) {
     const state = playerStatus(player, snapshot);
     return `<div class="player-seat ${turn ? 'current-turn' : ''} ${player.folded && snapshot.phase !== 'WAITING' ? 'folded' : ''}" style="--player-color:${playerColor(player.id)}">
       <div class="player-last-action">${escapeHtml(lastActionByPlayer[player.id] || '')}</div>
-      <div class="player-name"><span class="player-name-text">${escapeHtml(player.name)}</span>${snapshot.dealer === player.id ? '<span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span>' : ''}${snapshot.small_blind_player === player.id ? '<span class="blind-chip small-blind-chip" title="Small blind" aria-label="Small blind">SB</span>' : ''}${snapshot.big_blind_player === player.id ? '<span class="blind-chip big-blind-chip" title="Big blind" aria-label="Big blind">BB</span>' : ''}</div>
+      <div class="player-name"><span class="player-name-text" title="${escapeHtml(player.name)}">${escapeHtml(player.name)}</span>${snapshot.dealer === player.id ? '<span class="dealer-chip" title="Dealer" aria-label="Dealer">D</span>' : ''}${snapshot.small_blind_player === player.id ? '<span class="blind-chip small-blind-chip" title="Small blind" aria-label="Small blind">SB</span>' : ''}${snapshot.big_blind_player === player.id ? '<span class="blind-chip big-blind-chip" title="Big blind" aria-label="Big blind">BB</span>' : ''}</div>
       <div class="player-hole">${(player.hole_cards || []).map(card).join('')}</div>
-      <div class="player-stack">Hand stack: $${player.stack}</div>
+      <div class="player-stack">Chips: ${formatChips(player.stack)}</div>
       <div class="player-bet">Street bet: $${player.bet}</div>
       <div class="player-hands">Hands played: ${player.hands_played || 0}</div>
       <div class="player-state">${state}</div>
@@ -243,9 +239,9 @@ function renderState(snapshot) {
   const action = snapshot.last_action;
   if (complete) {
     const eligible = players.filter(p => p.hands_played > 0);
-    const best = Math.max(...eligible.map(p => p.profit_loss));
-    const leaders = eligible.filter(p => p.profit_loss === best).map(p => p.name);
-    stateEls.status.textContent = `Match complete. ${leaders.length > 1 ? 'Joint winners' : 'Winner'}: ${leaders.join(', ')} (${formatProfit(best)}). Press Restart match to reset scores and play again with the same bots.`;
+    const best = Math.max(...eligible.map(p => p.stack));
+    const leaders = eligible.filter(p => p.stack === best).map(p => p.name);
+    stateEls.status.textContent = `Match complete. ${leaders.length > 1 ? 'Joint winners' : 'Winner'}: ${leaders.join(', ')} (${formatChips(best)}). Press Restart match to reset chips and play again with the same bots.`;
   } else if (gamePaused) {
     stateEls.status.textContent = 'Game paused. Press Continue to resume play.';
   } else if (snapshot.phase === 'SHOWDOWN') {
@@ -255,9 +251,9 @@ function renderState(snapshot) {
   } else if (snapshot.current_turn) {
     stateEls.status.textContent = `Hand ${snapshot.hand_number}: waiting for ${snapshot.current_turn}.`;
   } else if (!started) {
-    stateEls.status.textContent = canStart ? 'Bots are seated. Press Start to begin the match.' : 'Waiting for at least two connected bots to join.';
+    stateEls.status.textContent = canStart ? 'Bots are seated. Press Start to begin the match.' : 'Waiting for at least two connected bots with chips.';
   } else if (snapshot.phase === 'WAITING' && !canStart) {
-    stateEls.status.textContent = 'Fewer than two bots are connected. Play resumes when more bots join.';
+    stateEls.status.textContent = 'Fewer than two connected bots have chips. Waiting for eligible bots to join or reconnect.';
   } else {
     stateEls.status.textContent = 'Dealing the next hand…';
   }

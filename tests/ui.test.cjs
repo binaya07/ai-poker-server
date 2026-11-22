@@ -4,15 +4,21 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function ui() {
+function ui(withLeaderboard = false) {
   const elements = new Map();
   const sent = [];
-  const element = () => ({ textContent: '', innerHTML: '', handlers: {},
+  const element = () => ({ textContent: '', innerHTML: '', handlers: {}, children: [], parts: {},
+    style: { setProperty() {} },
+    appendChild(child) { this.children.push(child); },
+    querySelector(selector) {
+      if (selector === '.empty-chart') return null;
+      return this.parts[selector] ||= element();
+    },
     classList: { toggle() {} }, setAttribute() {},
     addEventListener(name, handler) { this.handlers[name] = handler; } });
   const context = vm.createContext({
     window: { location: { protocol: 'http:', host: 'localhost' } },
-    document: { getElementById(id) {
+    document: { createElement: element, getElementById(id) {
       if (!elements.has(id)) elements.set(id, element());
       return elements.get(id);
     } },
@@ -20,18 +26,41 @@ function ui() {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../frontend/static/app.js'), 'utf8'), context);
   // Isolate status/board rendering from the separate animated leaderboard.
-  vm.runInContext('renderStackChart = () => {};', context);
+  if (!withLeaderboard) vm.runInContext('renderStackChart = () => {};', context);
   const render = (snapshot) => { context.snapshot = snapshot; vm.runInContext('renderState(snapshot)', context); };
   return { elements, sent, render };
 }
 
 function state(overrides = {}) {
-  return { match_number: 1, hand_number: 1, hands_completed: 0, max_hands: 2,
+  return { hand_number: 1, hands_completed: 0, max_hands: 2,
     phase: 'PREFLOP', current_turn: 'a', running: true, pot: 30,
     players: ['a', 'b'].map(id => ({ id, name: id, connected: true, stack: 980,
       bet: 20, profit_loss: 0, hands_played: 0, hole_cards: [{ label: '??' }, { label: '??' }] })),
     community_cards: [], ...overrides };
 }
+
+test('leaderboard displays and ranks available chips instead of profit', () => {
+  const view = ui(true);
+  const snapshot = state();
+  Object.assign(snapshot.players[0], { stack: 400, profit_loss: 200 });
+  Object.assign(snapshot.players[1], { stack: 1600, profit_loss: -200 });
+  view.render(snapshot);
+  const rows = view.elements.get('stack-chart').children;
+  assert.equal(rows[0].parts['.stack-name'].textContent, 'b');
+  assert.equal(rows[0].parts['.stack-value'].textContent, '$1,600');
+  assert.equal(rows[1].parts['.stack-value'].textContent, '$400');
+  assert.equal(rows[0].parts['.stack-value'].className, 'stack-value');
+});
+
+test('busted players sit out but live all-in players remain in the hand', () => {
+  const view = ui();
+  const snapshot = state();
+  Object.assign(snapshot.players[0], { stack: 0, hole_cards: [], folded: true });
+  Object.assign(snapshot.players[1], { stack: 0, all_in: true });
+  view.render(snapshot);
+  assert.match(view.elements.get('players').innerHTML, /Out of chips/);
+  assert.match(view.elements.get('players').innerHTML, />All-in</);
+});
 
 test('active player, waiting opponent, showdown and late join have distinct labels', () => {
   const view = ui();
@@ -80,8 +109,21 @@ test('restart button sends observer command and accepts a new match starting at 
   assert.equal(button.disabled, false);
   button.handlers.click();
   assert.deepEqual(view.sent, [{ type: 'restart_match' }]);
-  view.render(state({ match_number: 2 }));
+  view.render(state({ hand_number: 0, phase: 'WAITING', current_turn: null, last_action: null }));
+  view.render(state());
   assert.equal(button.textContent, 'Pause');
+});
+
+test('table shows chip amounts and final winner is chosen by stack, not profit', () => {
+  const view = ui();
+  const final = state({ phase: 'WAITING', match_complete: true });
+  final.players[0].stack = 1500;
+  final.players[0].profit_loss = -500;
+  final.players[1].stack = 500;
+  final.players[1].profit_loss = 500;
+  final.players.forEach(p => p.hands_played = 1);
   view.render(final);
-  assert.equal(button.textContent, 'Pause');
+  assert.match(view.elements.get('players').innerHTML, /Chips: \$1,500/);
+  assert.doesNotMatch(view.elements.get('players').innerHTML, /P\/L|profit|loss/);
+  assert.match(view.elements.get('status-message').textContent, /Winner: a \(\$1,500\)/);
 });
